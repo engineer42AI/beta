@@ -3,6 +3,8 @@
 import { useUser } from "@/hooks/useUser";
 import { UserMenu } from "@/components/user-menu";
 
+import { ModeToggle } from "@/components/mode-toggle";
+
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -90,6 +92,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="font-semibold">Engineer42</div>
 
         <div className="ml-auto flex items-center gap-2">
+          <ModeToggle />
           <UserMenu />
         </div>
       </header>
