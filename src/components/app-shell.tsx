@@ -1,37 +1,58 @@
 "use client";
 
-import { useUser } from "@/hooks/useUser";
-import { UserMenu } from "@/components/user-menu";
-
-import { ModeToggle } from "@/components/mode-toggle";
-
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+
+import { useUser } from "@/hooks/useUser";
+import { UserMenu } from "@/components/user-menu";
+import { ModeToggle } from "@/components/mode-toggle";
+
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   Home, Network, FileText, Settings, Menu,
-  ChevronLeft, ChevronRight, PanelBottom,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 
 import BottomConsole from "@/components/console/bottom-console";
 import { useConsoleStore } from "@/store/console-store";
-
 import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
 
+/* ---- Nav model ---- */
+type NavItemDef = {
+  href: string;
+  label: string;
+  icon: any;
+  public?: boolean; // true = visible when logged out
+};
+
+const NAV_ITEMS: NavItemDef[] = [
+  { href: "/", label: "Overview", icon: Home, public: true },
+  { href: "/graph", label: "Graph", icon: Network },
+  { href: "/docs", label: "Docs", icon: FileText },
+  { href: "/settings", label: "Settings", icon: Settings },
+];
+
+/* ---- Single NavItem component ---- */
 function NavItem({
   href, icon: Icon, label, collapsed,
 }: { href: string; icon: any; label: string; collapsed: boolean }) {
   const pathname = usePathname();
-  const active = pathname === href;
-  const base = "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-muted";
-  const cls = active ? base + " bg-muted" : base;
+  const active = pathname === href || pathname.startsWith(href + "/");
+  const base = "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm";
+  const cls = active ? base + " bg-muted" : base + " hover:bg-muted";
 
   return (
-    <Link href={href} className={cls} aria-label={label} title={collapsed ? label : undefined}>
+    <Link
+      href={href}
+      className={cls}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      title={collapsed ? label : undefined}
+    >
       <Icon className="h-5 w-5 shrink-0" />
       {!collapsed && <span className="truncate">{label}</span>}
     </Link>
@@ -50,10 +71,24 @@ function ConsoleBar() {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  const { open, toggle: toggleConsole, consoleSize, setConsoleSize } = useConsoleStore();
+  const { open, consoleSize, setConsoleSize } = useConsoleStore();
+
+  // ✅ hooks must be inside a component
+  const { data } = useUser();
+  const authed = !!data?.authenticated;
+
+  function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
+    const items = NAV_ITEMS.filter(i => i.public || authed);
+    return (
+      <nav className="space-y-1">
+        {items.map(it => (
+          <NavItem key={it.href} href={it.href} icon={it.icon} label={it.label} collapsed={collapsed} />
+        ))}
+      </nav>
+    );
+  }
 
   return (
-    // 2 rows: header | body
     <div className="grid grid-rows-[auto_1fr] h-dvh">
       {/* Header */}
       <header className="flex items-center gap-2 border-b px-3 h-12">
@@ -69,12 +104,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <div className="px-3 py-2 font-semibold">Engineer42</div>
               <Separator />
               <ScrollArea className="h-[calc(100dvh-3rem)] p-2">
-                <nav className="space-y-1">
-                  <NavItem href="/" icon={Home} label="Overview" collapsed={false} />
-                  <NavItem href="/graph" icon={Network} label="Graph" collapsed={false} />
-                  <NavItem href="/docs" icon={FileText} label="Docs" collapsed={false} />
-                  <NavItem href="/settings" icon={Settings} label="Settings" collapsed={false} />
-                </nav>
+                <SidebarNav />
               </ScrollArea>
             </SheetContent>
           </Sheet>
@@ -102,34 +132,29 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {/* Sidebar */}
         <aside className={`hidden md:flex flex-col border-r transition-all duration-200 ${collapsed ? "w-14" : "w-60"}`}>
           <div className="px-2 py-2">
-            <nav className="space-y-1">
-              <NavItem href="/" icon={Home} label="Overview" collapsed={collapsed} />
-              <NavItem href="/graph" icon={Network} label="Graph" collapsed={collapsed} />
-              <NavItem href="/docs" icon={FileText} label="Docs" collapsed={collapsed} />
-              <NavItem href="/settings" icon={Settings} label="Settings" collapsed={collapsed} />
-            </nav>
+            <SidebarNav collapsed={collapsed} />
           </div>
         </aside>
 
         {/* Right column: vertical resizable split */}
         <div className="min-h-0 min-w-0">
           <PanelGroup
-              direction="vertical"
-              className="h-full"
-              onLayout={(sizes) => {
-                if (!open) return;
-                const s = Math.round(sizes[1] ?? 0);
-                if (s >= 20 && s <= 70) setConsoleSize(s);   // only persist valid sizes
-              }}
+            direction="vertical"
+            className="h-full"
+            onLayout={(sizes) => {
+              if (!open) return;
+              const s = Math.round(sizes[1] ?? 0);
+              if (s >= 20 && s <= 70) setConsoleSize(s);
+            }}
           >
             {/* MAIN CONTENT */}
             <Panel defaultSize={100 - consoleSize} minSize={10}>
-              <main className="h-full overflow-hidden min-h-0">  {/* <-- allow child to shrink */}
+              <main className="h-full overflow-hidden min-h-0">
                 <div className="h-full p-3">{children}</div>
               </main>
             </Panel>
 
-            {/* Handle only when console is open */}
+            {/* Resize handle only when console is open */}
             {open ? (
               <PanelResizeHandle className="group relative h-3 z-50">
                 <div className="absolute inset-0 cursor-row-resize" />
@@ -146,7 +171,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 key="console-open"
                 defaultSize={consoleSize}
                 minSize={20}
-                maxSize={70}        // <-- cap at 70% so main always keeps at least 30%
+                maxSize={70}
                 collapsedSize={0}
                 collapsible
               >
