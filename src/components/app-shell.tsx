@@ -29,10 +29,10 @@ type NavItemDef = {
   public?: boolean; // true = visible when logged out
 };
 
-const NAV_ITEMS: NavItemDef[] = [
-  { href: "/", label: "Overview", icon: Home, public: true },
-  { href: "/graph", label: "Graph", icon: Network },
-  { href: "/docs", label: "Docs", icon: FileText },
+const NAV_ITEMS = [
+  { href: "/overview", label: "Overview", icon: Home, public: false },
+  { href: "/graph",    label: "Graph",    icon: Network },
+  { href: "/docs",     label: "Docs",     icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
