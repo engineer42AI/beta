@@ -220,7 +220,7 @@ function SectionEditor({
 
   return (
     <section className="tiptap-card">
-      <div className="px-5 pt-4 text-sm text-muted-foreground">{section.title}</div>
+      <div className="section-kicker px-5">{section.title}</div>
       <div className="px-5 pb-5">
         <EditorContent editor={editor} />
       </div>
@@ -603,7 +603,7 @@ export default function Page() {
   }, [activeId, availableTiles, doc.sections]);
 
   return (
-    <div className="flex h-[calc(100vh-60px)] tdp-doc">
+    <div className="flex min-h-0 tdp-doc">
       {/* Sidebar */}
       <aside className="w-80 border-r border-border p-3 space-y-3 overflow-auto">
         <div className="text-sm font-semibold mb-1">{doc.name}</div>
@@ -649,7 +649,12 @@ export default function Page() {
 
           {/* LIBRARY */}
           <div className="pt-4 space-y-2">
-            <div className="text-xs text-muted-foreground">Drag from below into the list above</div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Drag from below into the list above.</span>
+              <span className="badge-pill whitespace-nowrap" title="The list below is our recommended section order">
+                Suggested order
+              </span>
+            </div>
             <DroppableZone id={LIB_ZONE_ID}>
               <SortableContext items={libIds} strategy={verticalListSortingStrategy}>
                 <div className="grid grid-cols-1 gap-2">
@@ -686,7 +691,7 @@ export default function Page() {
       </aside>
 
       {/* Editors */}
-      <main className="flex-1 overflow-auto p-6 space-y-6">
+      <main className="flex-1 min-h-0 p-6 space-y-6 overflow-visible">
         {doc.sections.map((s) => (
           <SectionEditor
             key={s.id}

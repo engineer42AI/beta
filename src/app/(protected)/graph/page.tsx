@@ -231,9 +231,9 @@ const initialEdgesBase: Edge[] = [
 
 export default function GraphPage() {
   return (
-    <div className="h-full min-h-0 flex flex-col">
+    <div className="h-full min-h-0 flex flex-col overflow-hidden">{/* flex parent */}
       <ReactFlowProvider>
-        <FlowCanvas />
+        <FlowCanvas /> {/* flex item */}
       </ReactFlowProvider>
     </div>
   );
@@ -362,195 +362,170 @@ function FlowCanvas() {
     },
     [setNodes, setEdges]
   );
-
   return (
-    <>
+      // ⬇️ wrap in a flex column that can shrink
+      <div className="min-h-0 flex-1 flex flex-col">
         {/* Toolbar */}
         <div className="h-11 border-b px-3 flex items-center gap-2 bg-background">
           <PaletteButton kind="hazard" label="Hazard" onAdd={(pos) => addNode("hazard", pos)} />
           <PaletteButton kind="control" label="Control" onAdd={(pos) => addNode("control", pos)} />
           <PaletteButton kind="note" label="Note" onAdd={(pos) => addNode("note", pos)} />
-
-          <div className="ml-auto flex items-center gap-2">
-            <div className="text-xs text-muted-foreground hidden md:block">
-              Tip: double-click text inside a node to edit • drag from palette • <kbd>Shift</kbd>+click canvas to add
-            </div>
+          <div className="ml-auto hidden md:block text-xs text-muted-foreground">
+            Tip: double-click text inside a node to edit • drag from palette • <kbd>Shift</kbd>+click canvas to add
           </div>
         </div>
 
-      {/* Canvas */}
-      <div
-        ref={wrapperRef}
-        className="flex-1 min-h-0 rounded-lg border overflow-hidden"
-        onKeyDown={onKeyDown}
-        tabIndex={0}
-      >
-        <ReactFlow
-          className="w-full h-full"
-          nodes={nodes}
-          edges={edges}
-          onSelectionChange={({ nodes }) => setSelectedId(nodes[0]?.id ?? null)}
-          onNodesChange={(chs) => onNodesChange(chs)}
-          onEdgesChange={(chs) => onEdgesChange(chs)}
-          onConnect={onConnect}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onPaneClick={onPaneClick}
-          nodeTypes={nodeTypes}
-          connectionMode={ConnectionMode.Loose}
-          snapToGrid
-          snapGrid={[10, 10]}
-          fitView
+        {/* Canvas */}
+        <div
+          ref={wrapperRef}
+          className="min-h-0 flex-1 relative rounded-lg border overflow-hidden"
+          onKeyDown={onKeyDown}
+          tabIndex={0}
         >
-          {/* Hidden on mobile/tablet; shows on ≥1024px */}
-          <MiniMap className="hidden lg:block" />
-          <Controls />
-          <Background gap={20} size={1} />
+          <ReactFlow
+            className="absolute inset-0"   // fill wrapper fully
+            nodes={nodes}
+            edges={edges}
+            onSelectionChange={({ nodes }) => setSelectedId(nodes[0]?.id ?? null)}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onPaneClick={onPaneClick}
+            nodeTypes={nodeTypes}
+            connectionMode={ConnectionMode.Loose}
+            snapToGrid
+            snapGrid={[10, 10]}
+            fitView
+          >
+              <MiniMap className="hidden lg:block" />
+              <Controls />
+              <Background gap={20} size={1} />
 
-          {/* Toggle (hidden on mobile) */}
-          {!isMobile && (
-            <Panel position="top-left" style={{ top: 12, left: 12, background: 'transparent', boxShadow: 'none', zIndex: 5 }}>
-              <Button
-                variant="secondary"
-                size="icon"
-                className="h-8 w-8 shadow"
-                title={showInspector ? "Hide inspector (i)" : "Show inspector (i)"}
-                onClick={() => setShowInspector(v => !v)}
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
-                  <path d="M12 2a10 10 0 1 0 .001 20.001A10 10 0 0 0 12 2Zm0 4.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM10.75 11a1 1 0 1 0 0 2h.5v4.25a1 1 0 1 0 2 0V12a1 1 0 0 0-1-1h-1.5Z"/>
-                </svg>
-              </Button>
-            </Panel>
-          )}
+              {!isMobile && (
+                <Panel position="top-left" style={{ top: 12, left: 12, background: "transparent", boxShadow: "none", zIndex: 5 }}>
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="h-8 w-8 shadow"
+                    title={showInspector ? "Hide inspector (i)" : "Show inspector (i)"}
+                    onClick={() => setShowInspector(v => !v)}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+                      <path d="M12 2a10 10 0 1 0 .001 20.001A10 10 0 0 0 12 2Zm0 4.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM10.75 11a1 1 0 1 0 0 2h.5v4.25a1 1 0 1 0 2 0V12a1 1 0 0 0-1-1h-1.5Z"/>
+                    </svg>
+                  </Button>
+                </Panel>
+              )}
 
-          {/* Top-left inspector toggle, below the canvas border */}
-            <Panel
-              position="top-left"
-              style={{ top: 12, left: 12, background: "transparent", boxShadow: "none", zIndex: 5 }}
-            >
-              <Button
-                variant="secondary"
-                size="icon"
-                className="h-8 w-8 shadow"
-                title={showInspector ? "Hide inspector (i)" : "Show inspector (i)"}
-                onClick={() => setShowInspector(v => !v)}
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
-                  <path d="M12 2a10 10 0 1 0 .001 20.001A10 10 0 0 0 12 2Zm0 4.75a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM10.75 11a1 1 0 1 0 0 2h.5v4.25a1 1 0 1 0 2 0V12a1 1 0 0 0-1-1h-1.5Z"/>
-                </svg>
-              </Button>
-            </Panel>
+              {!isMobile && showInspector && (
+                <Panel position="top-right" style={{ top: 12, right: 12, zIndex: 5 }}>
+                  <div
+                      className="
+                        rounded-lg border shadow-lg
+                        bg-white dark:bg-neutral-900  /* solid background */
+                        p-3
+                        flex flex-col
+                      "
+                      style={{
+                          // width: min 280px, prefer 70vw, max 500px
+                          width: 'clamp(280px, 70vw, 500px)',
 
-          {/* Inspector panel (hidden/disabled on mobile) */}
-          {!isMobile && showInspector && (
-              <Panel position="top-right" style={{ top: 12, right: 12, zIndex: 5 }}>
-                <div
-                  className="
-                    rounded-lg border shadow-lg
-                    bg-white dark:bg-neutral-900  /* solid background */
-                    p-3
-                    flex flex-col
-                  "
-                  style={{
-                      // width: min 280px, prefer 70vw, max 500px
-                      width: 'clamp(280px, 70vw, 500px)',
+                          // height: min 260px, prefer 45vh, max 320px
+                          height: 'clamp(260px, 45vh, 320px)',
 
-                      // height: min 260px, prefer 45vh, max 320px
-                      height: 'clamp(260px, 45vh, 320px)',
-
-                      // keep it inside the canvas even on tiny screens
-                      maxWidth: 'calc(100% - 24px)',
-                      maxHeight: 'calc(100% - 24px)',
-                  }}
-                >
-                  {/* header */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm font-semibold">Node Inspector</div>
-                    <div className="text-xs text-muted-foreground">
-                      {selectedNode ? `#${selectedNode.id}` : "No selection"}
-                    </div>
-                  </div>
-
-                  {/* scrollable content */}
-                  <div className="flex-1 overflow-auto space-y-3">
-                    {!selectedNode ? (
-                      <div className="text-sm text-muted-foreground">
-                        Select a node to view its metadata.
-                      </div>
-                    ) : (
-                      <>
-                        <details className="rounded border p-2" open>
-                          <summary className="cursor-pointer text-sm font-medium mb-1">Raw data</summary>
-                          <pre
-                            className="
-                              text-xs whitespace-pre-wrap break-words
-                              rounded p-2
-                              bg-white/60 dark:bg-neutral-800/60
-                              max-h-28 overflow-auto
-                            "
-                          >
-                            {JSON.stringify(selectedNode.data, null, 2)}
-                          </pre>
-                        </details>
-
-                        <div className="space-y-2">
-                          <label className="text-xs font-medium">Title</label>
-                          <input
-                            className="w-full rounded border bg-transparent px-2 py-1 text-sm overflow-hidden text-ellipsis"
-                            value={selectedNode.data?.title ?? ""}
-                            onChange={(e) =>
-                              setNodes((prev) =>
-                                prev.map((n) =>
-                                  n.id === selectedNode.id
-                                    ? { ...n, data: { ...n.data, title: e.target.value } }
-                                    : n
-                                )
-                              )
-                            }
-                          />
-
-                          <label className="text-xs font-medium">Body</label>
-                          <textarea
-                            rows={4}
-                            className="w-full rounded border bg-transparent px-2 py-1 text-sm resize-y whitespace-pre-wrap break-words"
-                            value={selectedNode.data?.body ?? ""}
-                            onChange={(e) =>
-                              setNodes((prev) =>
-                                prev.map((n) =>
-                                  n.id === selectedNode.id
-                                    ? { ...n, data: { ...n.data, body: e.target.value } }
-                                    : n
-                                )
-                              )
-                            }
-                          />
-
-                          <label className="text-xs font-medium">Action</label>
-                          <input
-                            className="w-full rounded border bg-transparent px-2 py-1 text-sm overflow-hidden text-ellipsis"
-                            value={selectedNode.data?.action ?? ""}
-                            onChange={(e) =>
-                              setNodes((prev) =>
-                                prev.map((n) =>
-                                  n.id === selectedNode.id
-                                    ? { ...n, data: { ...n.data, action: e.target.value } }
-                                    : n
-                                )
-                              )
-                            }
-                          />
+                          // keep it inside the canvas even on tiny screens
+                          maxWidth: 'calc(100% - 24px)',
+                          maxHeight: 'calc(100% - 24px)',
+                      }}
+                  >
+                      {/* header */}
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-sm font-semibold">Node Inspector</div>
+                        <div className="text-xs text-muted-foreground">
+                          {selectedNode ? `#${selectedNode.id}` : "No selection"}
                         </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </Panel>
-          )}
+                      </div>
 
-        </ReactFlow>
+                      {/* scrollable content */}
+                      <div className="flex-1 overflow-auto space-y-3">
+                        {!selectedNode ? (
+                          <div className="text-sm text-muted-foreground">
+                            Select a node to view its metadata.
+                          </div>
+                        ) : (
+                          <>
+                            <details className="rounded border p-2" open>
+                              <summary className="cursor-pointer text-sm font-medium mb-1">Raw data</summary>
+                              <pre
+                                className="
+                                  text-xs whitespace-pre-wrap break-words
+                                  rounded p-2
+                                  bg-white/60 dark:bg-neutral-800/60
+                                  max-h-28 overflow-auto
+                                "
+                              >
+                                {JSON.stringify(selectedNode.data, null, 2)}
+                              </pre>
+                            </details>
+
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium">Title</label>
+                              <input
+                                className="w-full rounded border bg-transparent px-2 py-1 text-sm overflow-hidden text-ellipsis"
+                                value={selectedNode.data?.title ?? ""}
+                                onChange={(e) =>
+                                  setNodes((prev) =>
+                                    prev.map((n) =>
+                                      n.id === selectedNode.id
+                                        ? { ...n, data: { ...n.data, title: e.target.value } }
+                                        : n
+                                    )
+                                  )
+                                }
+                              />
+
+                              <label className="text-xs font-medium">Body</label>
+                              <textarea
+                                rows={4}
+                                className="w-full rounded border bg-transparent px-2 py-1 text-sm resize-y whitespace-pre-wrap break-words"
+                                value={selectedNode.data?.body ?? ""}
+                                onChange={(e) =>
+                                  setNodes((prev) =>
+                                    prev.map((n) =>
+                                      n.id === selectedNode.id
+                                        ? { ...n, data: { ...n.data, body: e.target.value } }
+                                        : n
+                                    )
+                                  )
+                                }
+                              />
+
+                              <label className="text-xs font-medium">Action</label>
+                              <input
+                                className="w-full rounded border bg-transparent px-2 py-1 text-sm overflow-hidden text-ellipsis"
+                                value={selectedNode.data?.action ?? ""}
+                                onChange={(e) =>
+                                  setNodes((prev) =>
+                                    prev.map((n) =>
+                                      n.id === selectedNode.id
+                                        ? { ...n, data: { ...n.data, action: e.target.value } }
+                                        : n
+                                    )
+                                  )
+                                }
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                  </div>
+                </Panel>
+              )}
+          </ReactFlow>
+        </div>
       </div>
-    </>
   );
 }
 

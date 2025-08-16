@@ -5,6 +5,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { useConsoleOffsetVar } from "@/hooks/useConsoleOffsetVar";
+
 import { useUser } from "@/hooks/useUser";
 import { UserMenu } from "@/components/user-menu";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -155,6 +157,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
 
 /* --- AppShell --- */
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  useConsoleOffsetVar(); // <-- keeps --console-offset current
   const [collapsed, setCollapsed] = useState(false);
   const { data } = useUser();
   const authed = !!data?.authenticated;

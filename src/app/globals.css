@@ -93,6 +93,7 @@ a { color: inherit; text-decoration: none; }
 @layer components {
   .tiptap-card {
     @apply bg-card border border-border rounded-[var(--radius)] shadow-sm;
+    position: relative; /* ← keep the ::before line inside each card */
   }
 
   /* Editor content area */
@@ -400,4 +401,110 @@ a { color: inherit; text-decoration: none; }
   .prose ul { list-style: disc outside; margin: 0.75rem 0 0.75rem 1.25rem; padding-left: 0; }
   .prose ol { list-style: decimal outside; margin: 0.75rem 0 0.75rem 1.25rem; padding-left: 0; }
   .prose li { margin: 0.25rem 0; list-style: inherit; }
+}
+
+/* ---------- Add a tiny badge style ---------- */
+@layer components {
+  .badge-pill{
+    @apply inline-flex items-center gap-1 px-2 py-[2px]
+           rounded-full border border-border/60
+           bg-accent/20 text-[10px] font-medium tracking-wide uppercase;
+  }
+  .badge-pill::before{
+    content:"";
+    width:6px; height:6px; border-radius:9999px;
+    background: hsl(var(--ring));
+  }
+}
+
+/* =====================  “Document page” styling for TDP editors  ===================== */
+
+/* Theme tokens for the page surface */
+@layer base {
+  :root {
+    --paper: 0 0% 100%;            /* page base (light) */
+    --paper-ink: 222.2 47.4% 11.2%;/* text on paper */
+    --paper-edge: 214.3 31.8% 91.4%;
+  }
+  .dark {
+    --paper: 220 10% 9%;           /* page base (dark) */
+    --paper-ink: 0 0% 98%;         /* text on paper */
+    --paper-edge: 220 8% 16%;
+  }
+}
+
+/* Make each editor feel like a sheet of paper */
+@layer components {
+  /* Outer card becomes a “page” */
+  .tiptap-card {
+    background: linear-gradient(
+        180deg,
+        color-mix(in oklab, hsl(var(--paper)) 100%, transparent) 0%,
+        color-mix(in oklab, hsl(var(--paper)) 92%, transparent) 100%
+      );
+    border-color: color-mix(in oklab, hsl(var(--paper-edge)) 88%, transparent);
+    border-radius: 18px;
+    box-shadow:
+      0 1px 0 rgba(0,0,0,.02),
+      0 8px 24px rgba(0,0,0,.06);
+  }
+
+  /* A subtle left “margin rule” to read like a document */
+  .tiptap-card::before {
+    content: none !important;
+    position: absolute;
+    left: 28px; top: 18px; bottom: 18px;
+    width: 1px;
+    background: color-mix(in oklab, hsl(var(--border)) 60%, transparent);
+    border-radius: 1px;
+    pointer-events: none;
+  }
+
+  /* Section masthead (small-caps stripe) */
+  .section-kicker {
+    display: flex; align-items: center; gap: .5rem;
+    height: 42px;
+    border-bottom: 1px solid color-mix(in oklab, hsl(var(--paper-edge)) 85%, transparent);
+    color: color-mix(in oklab, hsl(var(--paper-ink)) 70%, transparent);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    background:
+      linear-gradient(0deg,
+        color-mix(in oklab, hsl(var(--accent)) 42%, transparent) 0%,
+        transparent 100%);
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
+  }
+
+  /* Content typography sits a little away from the left rule */
+  .tiptap-content {
+    padding-left: 44px;  /* was 20 -> aligns with rule */
+    padding-right: 28px;
+    color: hsl(var(--paper-ink));
+    background: transparent;
+  }
+
+  /* Headings look more “editorial” */
+  .tiptap-content h1, .tiptap-content h2, .tiptap-content h3 {
+    letter-spacing: -0.015em;
+  }
+  .tiptap-content h1 { font-weight: 800; }
+  .tiptap-content h2 { font-weight: 700; }
+
+  /* Light divider lines inside page */
+  .tiptap-content hr {
+    border-top-color: color-mix(in oklab, hsl(var(--paper-edge)) 70%, transparent);
+  }
+
+  /* Links: a sober editorial blue */
+  .tiptap-content a {
+    color: color-mix(in oklab, hsl(var(--ring)) 85%, hsl(var(--paper-ink)) 15%);
+  }
+}
+
+/* Optional: give the editor area a neutral canvas backdrop so pages pop */
+@layer components {
+  main .tiptap-card:not(:first-child) { margin-top: 18px; }
+  .dark main { background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent); }
 }
