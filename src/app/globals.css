@@ -327,3 +327,77 @@ a { color: inherit; text-decoration: none; }
   }
   .tt-text-T { font-size: 14px; transform: translateY(-1px); }
 }
+
+/* ---------- Markdown content (info dialogs, help popups, etc.) ---------- */
+@layer components {
+  /* Use on the wrapper around ReactMarkdown */
+  .md-content {
+    @apply text-sm leading-7;
+  }
+
+  .md-content p { @apply my-3; }
+
+  /* Headings */
+  .md-content h1, .md-content h2, .md-content h3 {
+    @apply mt-5 mb-2 font-semibold tracking-tight;
+    line-height: 1.25; letter-spacing: -0.01em;
+  }
+  .md-content h1 { @apply text-xl; }
+  .md-content h2 { @apply text-lg; }
+  .md-content h3 { @apply text-base; }
+
+  /* ✅ Lists (restore markers removed by Tailwind Preflight) */
+  .md-content ul {
+    list-style: disc outside;
+    margin: 0.75rem 0 0.75rem 1.25rem; /* ~ my-3 ml-5 */
+    padding-left: 0;
+  }
+  .md-content ol {
+    list-style: decimal outside;
+    margin: 0.75rem 0 0.75rem 1.25rem;
+    padding-left: 0;
+  }
+  .md-content li { margin: 0.25rem 0; list-style: inherit; }
+  .md-content li::marker { color: hsl(var(--foreground)); opacity: .9; }
+  .md-content li > ul,
+  .md-content li > ol { margin-top: 0.25rem; }
+
+  /* Blockquotes */
+  .md-content blockquote {
+    @apply my-4 pl-3 italic text-muted-foreground border-l-2;
+    border-left-color: hsl(var(--ring));
+  }
+
+  /* Code */
+  .md-content code {
+    @apply rounded px-1 py-0.5 text-[0.95em];
+    background: color-mix(in oklab, currentColor 10%, transparent);
+  }
+  .md-content pre {
+    @apply rounded-md p-3 overflow-auto;
+    background: color-mix(in oklab, currentColor 10%, transparent);
+  }
+  .md-content pre code { background: transparent; padding: 0; }
+
+  /* HR */
+  .md-content hr { @apply my-5 border-0 border-t border-border; }
+
+  /* Links */
+  .md-content a { color: hsl(var(--ring)); text-decoration: none; }
+  .md-content a:hover { text-decoration: underline; }
+
+  /* Tables */
+  .md-content table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+  .md-content th, .md-content td {
+    @apply border border-border;
+    padding: 0.5rem 0.6rem; vertical-align: top;
+  }
+  .md-content thead th { @apply bg-accent text-accent-foreground; }
+}
+
+/* Optional: if you kept `prose` in the dialog wrapper, make it behave like md-content */
+@layer components {
+  .prose ul { list-style: disc outside; margin: 0.75rem 0 0.75rem 1.25rem; padding-left: 0; }
+  .prose ol { list-style: decimal outside; margin: 0.75rem 0 0.75rem 1.25rem; padding-left: 0; }
+  .prose li { margin: 0.25rem 0; list-style: inherit; }
+}
