@@ -71,8 +71,8 @@
 }
 
 /* your resets/utilities are fine */
-html, body { max-width: 100vw; overflow-x: hidden; }
-html, body, :root { height: 100%; }
+html, body { max-width: 100vw; overflow: hidden; }
+html, body, :root { height: 100dvh; }
 body {
   font-family: Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -87,4 +87,243 @@ a { color: inherit; text-decoration: none; }
     transition-duration: 150ms;
     transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   }
+}
+
+/* ---------------- TipTap card + content ---------------- */
+@layer components {
+  .tiptap-card {
+    @apply bg-card border border-border rounded-[var(--radius)] shadow-sm;
+  }
+
+  /* Editor content area */
+  .tiptap-content {
+    @apply px-5 py-4 min-h-[240px] outline-none text-[16px] leading-[1.65];
+    caret-color: hsl(var(--ring));
+  }
+
+  /* Focus ring on content - Show only for keyboard users (recommended) */
+  .tiptap-content:focus { outline: none; box-shadow: none; }
+  .tiptap-content:focus-visible {
+    box-shadow: 0 0 0 2px color-mix(in oklab, hsl(var(--ring)) 25%, transparent) inset;
+  }
+  .ProseMirror:focus { outline: none; } /* Safari */
+
+  /* Placeholder */
+  .tiptap-content p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* Typography */
+  .tiptap-content h1,
+  .tiptap-content h2,
+  .tiptap-content h3 {
+    @apply mt-5 mb-2 font-semibold tracking-tight;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+  .tiptap-content h1 { @apply text-2xl; }
+  .tiptap-content h2 { @apply text-xl; }
+  .tiptap-content h3 { @apply text-lg; }
+
+  .tiptap-content p { @apply my-3; }
+
+  /* ✅ Lists — fixed to override Tailwind preflight */
+  .tiptap-content ul {
+    list-style: disc outside;
+    margin: 0.75rem 0 0.75rem 1.25rem; /* my-3 ml-5 */
+    padding-left: 0;
+  }
+  .tiptap-content ol {
+    list-style: decimal outside;
+    margin: 0.75rem 0 0.75rem 1.25rem;
+    padding-left: 0;
+  }
+  .tiptap-content li {
+    margin: 0.25rem 0; /* my-1 */
+    list-style: inherit;
+  }
+  .tiptap-content li::marker {
+    color: hsl(var(--foreground));
+    opacity: .9;
+  }
+
+  /* Blockquotes */
+  .tiptap-content blockquote {
+    @apply my-4 pl-3 italic text-muted-foreground border-l-2;
+    border-left-color: hsl(var(--ring));
+  }
+
+  /* Inline + block code */
+  .tiptap-content code {
+    @apply rounded px-1 py-0.5 text-[0.95em];
+    background: color-mix(in oklab, currentColor 10%, transparent);
+  }
+  .tiptap-content pre {
+    @apply rounded-md p-3 overflow-auto;
+    background: color-mix(in oklab, currentColor 10%, transparent);
+  }
+  .tiptap-content pre code {
+    background: transparent;
+    padding: 0;
+  }
+
+  /* Horizontal rule */
+  .tiptap-content hr {
+    @apply my-5 border-0 border-t border-border;
+  }
+
+  /* Links */
+  .tiptap-content a {
+    color: hsl(var(--ring));
+    text-decoration: none;
+  }
+  .tiptap-content a:hover {
+    text-decoration: underline;
+  }
+
+  /* Fallback if any other lib overrides lists */
+  .ProseMirror ul { list-style: disc outside; }
+  .ProseMirror ol { list-style: decimal outside; }
+}
+
+
+/* ---------- Document shell ---------- */
+@layer components {
+  .doc-shell { @apply max-w-3xl mx-auto px-6 py-6; }
+
+  .doc-header { @apply mb-4; }
+  .doc-title { @apply text-sm text-muted-foreground flex gap-2 items-center; }
+  .doc-title-label { @apply font-medium; }
+  .doc-title-value { @apply text-foreground; }
+  .doc-meta { @apply text-xs text-muted-foreground mt-1; }
+
+  /* Heading counters (continuous across sections) */
+  .tdp-doc { counter-reset: h1; }
+  .tdp-doc .doc-content h1 { counter-increment: h1; counter-reset: h2; }
+  .tdp-doc .doc-content h2 { counter-increment: h2; counter-reset: h3; }
+  .tdp-doc .doc-content h3 { counter-increment: h3; }
+
+  .tdp-doc .doc-content h1::before {
+    content: counter(h1) ". ";
+    @apply text-muted-foreground;
+  }
+  .tdp-doc .doc-content h2::before {
+    content: counter(h1) "." counter(h2) " ";
+    @apply text-muted-foreground;
+  }
+  .tdp-doc .doc-content h3::before {
+    content: counter(h1) "." counter(h2) "." counter(h3) " ";
+    @apply text-muted-foreground;
+  }
+}
+
+/* ---------- Floating toolbar (only keep the theme-aware version) ---------- */
+@layer base {
+  :root {
+    --tt-bg: rgba(0,0,0,0.86);
+    --tt-border: rgba(0,0,0,0.35);
+    --tt-fg: #ffffff;
+    --tt-hover: rgba(255,255,255,0.06);
+    --tt-ring: hsl(var(--ring));
+  }
+  .dark {
+    --tt-bg: rgba(20,20,20,0.9);
+    --tt-border: rgba(255,255,255,0.18);
+    --tt-fg: #e5e7eb;
+    --tt-hover: rgba(255,255,255,0.07);
+    --tt-ring: hsl(var(--ring));
+  }
+}
+
+@layer components {
+  :root {
+      --console-offset: 0px;   /* will be updated by JS */
+      --tt-gap: 20px;          /* space above the console edge */
+  }
+
+  /* Toolbar fixed to viewport, offset by console height */
+  .tt-floating-wrap {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(env(safe-area-inset-bottom, 0px) + var(--console-offset) + var(--tt-gap));
+      z-index: 60;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+  }
+
+  .tt-floating-toolbar {
+    pointer-events: auto; /* allow interaction with buttons */
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px;
+    border-radius: 14px;
+    background: var(--tt-bg);
+    border: 1px solid var(--tt-border);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+    backdrop-filter: blur(6px);
+    color: var(--tt-fg);
+  }
+  .tt-group { position: relative; }
+  .tt-div {
+    width: 1px; height: 22px;
+    background: var(--tt-border);
+    margin: 0 4px;
+    border-radius: 1px;
+  }
+  .tt-btn {
+    height: 32px; min-width: 34px; padding: 0 10px;
+    border-radius: 10px; border: 1px solid transparent;
+    background: transparent; color: var(--tt-fg);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 500; cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, transform .08s ease;
+  }
+  .tt-btn:hover { background: var(--tt-hover); }
+  .tt-btn:active { transform: translateY(1px); }
+  .tt-btn.is-active {
+    border-color: var(--tt-ring);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--tt-ring) 28%, transparent) inset;
+  }
+
+  /* dropdown above the toolbar */
+  .tt-menu {
+    position: absolute; bottom: calc(100% + 8px); left: 0;
+    min-width: 180px;
+    background: var(--tt-bg);
+    border: 1px solid var(--tt-border);
+    border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    padding: 6px; z-index: 60; color: var(--tt-fg);
+  }
+  .tt-menu-item {
+    width: 100%; text-align: left;
+    padding: 8px 10px; border-radius: 8px;
+    background: transparent; color: inherit;
+    font-size: 13px; cursor: pointer;
+  }
+  .tt-menu-item:hover { background: var(--tt-hover); }
+
+  /* Grid layout (T dropdown) */
+  .tt-menu-grid-format {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+  }
+  .tt-menu-grid-format .tt-menu-item {
+    text-align: center; font-weight: 600; padding: 10px 8px;
+  }
+  .tt-menu-item.is-active {
+    border: 1px solid var(--tt-ring);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--tt-ring) 28%, transparent) inset;
+    border-radius: 10px;
+  }
+  .tt-menu-grid-insert {
+    display: flex; flex-direction: column; gap: 4px; padding: 8px;
+  }
+  .tt-text-T { font-size: 14px; transform: translateY(-1px); }
 }

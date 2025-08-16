@@ -1,6 +1,12 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
+
+// your globals (Tailwind etc.)
 import "./globals.css";
-import AppShell from "@/components/app-shell";
+
+// Base editor CSS
+import "prosemirror-view/style/prosemirror.css";
+
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
@@ -10,11 +16,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body>
-        <ThemeProvider>
-          {children}
-        </ThemeProvider>
+    <html lang="en" className="h-dvh overflow-y-clip" suppressHydrationWarning>
+      <body className="h-full overflow-y-clip bg-background text-foreground">
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
