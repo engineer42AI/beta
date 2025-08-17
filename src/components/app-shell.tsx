@@ -53,6 +53,7 @@ const NAV_ITEMS: NavItem[] = [
       { label: "TDP V1", href: "/system-c/technology-development-plan-V1", icon: Users },
       { label: "Stakeholders V1", href: "/system-b/stakeholders-V1", icon: Users },
       { label: "Stakeholders V2", href: "/system-b/stakeholders-V2", icon: Users },
+      { label: "Browse cert spec V1", href: "/system-b/browse-cert-specs-V1", icon: Users },
     ],
   },
 ];
