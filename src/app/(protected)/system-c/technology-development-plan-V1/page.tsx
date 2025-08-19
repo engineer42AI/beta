@@ -8,6 +8,7 @@ import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import Placeholder from "@tiptap/extension-placeholder";
 
+
 import {
   DndContext,
   closestCenter,
@@ -31,7 +32,7 @@ import {
 } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 
-import { X, HelpCircle, Move } from "lucide-react";
+import { X, HelpCircle, Move, Sparkles, ListChecks, FileQuestion, ShieldAlert } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -175,10 +176,12 @@ function SectionEditor({
   section,
   onChange,
   onFocusEditor,
+  onOpenAI,
 }: {
   section: Section;
   onChange: (json: any) => void;
   onFocusEditor: (ed: Editor | null) => void;
+  onOpenAI: (section: Section) => void;
 }) {
   const editor = useEditor({
     extensions: [
@@ -220,10 +223,23 @@ function SectionEditor({
 
   return (
     <section className="tiptap-card">
-      <div className="section-kicker px-5">{section.title}</div>
-      <div className="px-5 pb-5">
-        <EditorContent editor={editor} />
-      </div>
+        <div className="section-kicker px-5 flex items-center justify-between">
+          <span>{section.title}</span>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs
+                       text-muted-foreground hover:text-foreground hover:bg-accent"
+            onClick={() => onOpenAI(section)}
+            aria-label={`Open AI guidance for ${section.title}`}
+            title="Open AI guidance"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden sm:inline">AI</span>
+          </button>
+        </div>
+        <div className="px-5 pb-5">
+          <EditorContent editor={editor} />
+        </div>
     </section>
   );
 }
@@ -417,6 +433,109 @@ function FloatingToolbar({ editor }: { editor: Editor | null }) {
   );
 }
 
+/* ----------------- tiny helper to extract markdown from TipTap JSON for one section ------------ */
+function tiptapToMarkdown(node: any, parentType?: string, index?: number): string {
+  if (!node) return "";
+  const type = node.type;
+  const text = node.text || "";
+
+  // Children
+  const children = Array.isArray(node.content)
+    ? node.content.map((child, i) => tiptapToMarkdown(child, type, i)).join("")
+    : "";
+
+  switch (type) {
+    case "doc":
+      return children;
+
+    case "paragraph":
+      return children.trim() ? children + "\n\n" : "\n";
+
+    case "heading": {
+      const level = node.attrs?.level || 1;
+      const hashes = "#".repeat(level);
+      return `${hashes} ${children.trim()}\n\n`;
+    }
+
+    case "blockquote":
+      return children
+        .split("\n")
+        .map((line: string) => (line ? `> ${line}` : ""))
+        .join("\n") + "\n\n";
+
+    case "bulletList":
+      return children + "\n";
+
+    case "orderedList": {
+      return (node.content || [])
+        .map((li: any, i: number) =>
+          tiptapToMarkdown(li, "orderedList", i + 1)
+        )
+        .join("") + "\n";
+    }
+
+    case "listItem": {
+      if (parentType === "bulletList") {
+        return `- ${children.trim().replace(/\n+/g, " ")}\n`;
+      } else if (parentType === "orderedList") {
+        return `${index}. ${children.trim().replace(/\n+/g, " ")}\n`;
+      }
+      return children + "\n";
+    }
+
+    case "text": {
+      let out = text;
+      if (node.marks) {
+        for (const mark of node.marks) {
+          if (mark.type === "bold") out = `**${out}**`;
+          if (mark.type === "italic") out = `*${out}*`;
+          if (mark.type === "code") out = `\`${out}\``;
+        }
+      }
+      return out;
+    }
+
+    case "codeBlock":
+      return "```\n" + children.trim() + "\n```\n\n";
+
+    case "hardBreak":
+      return "\n";
+
+    default:
+      return children;
+  }
+}
+
+// Build a single markdown doc from the current TDP
+function buildTdpMarkdown(doc: TdpDoc): string {
+  const parts: string[] = [];
+  for (const s of doc.sections) {
+    const sectionMarkdown = tiptapToMarkdown(s.content).trim();
+    if (sectionMarkdown) {
+      parts.push(sectionMarkdown);
+    }
+  }
+  // Clean up excessive blank lines
+  return parts.join("\n\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+}
+
+// Add a small Markdown card component
+function MarkdownCard({
+  markdown,
+  className = "",
+}: {
+  markdown: string;
+  className?: string;
+}) {
+  return (
+    <div className={`rounded-lg border border-border bg-accent/20 p-4 shadow-sm ${className}`}>
+      <div className="md-content">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Info Dialog ---------------- */
 
 function InfoDialog({
@@ -453,6 +572,90 @@ function InfoDialog({
     </div>
   );
 }
+
+
+/* ================ AI inline guidance panel on the right side ==================== */
+function AIGuidancePanel({
+  open,
+  sectionTitle,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  sectionTitle: string | null;
+  onClose: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className={`fixed inset-0 z-[11000] ${open ? '' : 'pointer-events-none'}`}>
+      {/* backdrop */}
+      <div
+        className={`absolute inset-0 bg-black/30 transition-opacity ${open ? 'opacity-100' : 'opacity-0'}`}
+        onClick={onClose}
+        aria-hidden
+      />
+      {/* panel */}
+      <aside
+        className={`absolute right-0 top-0 h-full w-full max-w-[420px] bg-background border-l border-border shadow-xl
+                    transition-transform duration-300 ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="AI Guidance"
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4" />
+            <div className="font-semibold">AI Guidance</div>
+          </div>
+          <button
+            className="p-1 rounded hover:bg-accent text-muted-foreground"
+            onClick={onClose}
+            aria-label="Close AI panel"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="px-4 py-3 text-sm text-muted-foreground border-b border-border">
+          For: <span className="font-medium text-foreground">{sectionTitle ?? "Section"}</span>
+        </div>
+
+        {/* Content area — put your guidance UI here */}
+        <div className="p-4 space-y-4 overflow-auto h-[calc(100%-104px)]">
+          {children ?? (
+            <div className="space-y-3 text-sm">
+              <div className="font-medium">Quick actions</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button className="btn">Make goals SMART</button>
+                <button className="btn">Suggest scope & boundaries</button>
+                <button className="btn">Extract assumptions</button>
+                <button className="btn">Find missing fields</button>
+              </div>
+
+              <div className="pt-2">
+                <div className="font-medium mb-1">Guidance</div>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>Check platform fit and representative use-cases.</li>
+                  <li>State target TRL/MRL and timeframe.</li>
+                  <li>Capture risks, constraints, and critical interfaces (ATA).</li>
+                </ul>
+              </div>
+
+              <div>
+                <div className="font-medium mb-1">Ask the AI</div>
+                <div className="rounded-md border border-dashed p-3 text-muted-foreground">
+                  {/* Replace with your chat input later */}
+                  Type your question in the console or wire a mini-input here.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 
 /* ---------------- Page ---------------- */
 
@@ -602,6 +805,89 @@ export default function Page() {
     return s?.title ?? null;
   }, [activeId, availableTiles, doc.sections]);
 
+  // for AI button in each panel
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiSectionTitle, setAiSectionTitle] = useState<string | null>(null);
+  const [aiSectionId, setAiSectionId] = useState<string | null>(null);
+
+  const openAIForSection = useCallback((section: Section) => {
+    setAiSectionId(section.id);
+    setAiSectionTitle(section.title);
+    setAiOpen(true);
+  }, []);
+
+  const aiSection = useMemo(
+      () => doc.sections.find(s => s.id === aiSectionId) ?? null,
+      [doc.sections, aiSectionId]
+  );
+
+  const aiSectionMarkdown = useMemo(
+      () => tiptapToMarkdown(aiSection?.content) || "",
+      [aiSection]
+  );
+
+  const closeAI = useCallback(() => setAiOpen(false), []);
+
+  const tdpMarkdown = useMemo(() => buildTdpMarkdown(doc), [doc]);
+
+  // for managing the inline-AI markdown output
+  const [showRaw, setShowRaw] = useState(false);
+
+  // --- AI call state ---
+  const [aiTask, setAiTask] = useState<null | "guidance" | "smart" | "assumptions" | "lint">(null);
+  const [aiOut, setAiOut] = useState<string>("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  // Helper: build full TDP markdown (you already added this earlier)
+  function buildTdpMarkdown(doc: TdpDoc): string {
+      const parts: string[] = [];
+      for (const s of doc.sections) {
+        const sectionMarkdown = tiptapToMarkdown(s.content).trim();
+        if (sectionMarkdown) parts.push(sectionMarkdown);
+      }
+      return parts.join("\n\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  }
+
+  // Call the inline agent
+  const callInline = useCallback(
+      async (task: "guidance" | "smart" | "assumptions" | "lint") => {
+        const sec = doc.sections.find(s => s.id === aiSectionId);
+        if (!sec) return;
+
+        const payload = {
+          task,
+          section_title: sec.title,
+          section_markdown: tiptapToMarkdown(sec.content),
+          tdp_markdown: buildTdpMarkdown(doc), // include or remove if you want section-only
+        };
+
+        setAiTask(task);
+        setAiLoading(true);
+        setAiOut("");
+        setAiError(null);
+
+        try {
+          const r = await fetch("/api/ai/tdp/inline", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await r.json();
+          if (!r.ok || data.error) {
+            setAiError(typeof data.error === "string" ? data.error : "Agent error");
+          } else {
+            setAiOut(data.markdown || "");
+          }
+        } catch (e: any) {
+          setAiError(e?.message || "Network error");
+        } finally {
+          setAiLoading(false);
+        }
+      },
+      [doc, aiSectionId]
+  );
+
   return (
     <div className="flex min-h-0 tdp-doc">
       {/* Sidebar */}
@@ -698,12 +984,166 @@ export default function Page() {
             section={s}
             onChange={(json) => updateContent(s.id, json)}
             onFocusEditor={setCurrentEditor}
+            onOpenAI={openAIForSection}
           />
         ))}
         <FloatingToolbar editor={currentEditor} />
       </main>
 
       <InfoDialog open={infoOpen} title={infoTitle} markdown={infoMarkdown} onClose={closeInfo} />
+
+      <AIGuidancePanel
+          open={aiOpen}
+          sectionTitle={aiSectionTitle}
+          onClose={() => { setAiOpen(false); setAiOut(""); setAiError(null); setAiTask(null); }}
+      >
+          {/* Controls */}
+          <div className="space-y-4">
+            <div>
+              <div className="font-medium mb-2">Inline actions</div>
+
+              {/*
+                Nice pill buttons with icons. Each button calls your existing "callInline".
+                Active state = last run, disabled while loading.
+              */}
+              <div className="flex flex-wrap gap-2">
+                  <button
+                    disabled={aiLoading}
+                    onClick={() => callInline("guidance")}
+                    className={[
+                      "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                      "hover:bg-accent transition",
+                      "disabled:opacity-60 disabled:cursor-not-allowed",
+                      aiTask === "guidance" ? "border-ring shadow-[inset_0_0_0_1px_color-mix(in_oklab,hsl(var(--ring))_40%,transparent)]" : "border-border"
+                    ].join(" ")}
+                    title="Guidance"
+                    aria-label="Guidance"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>Guidance</span>
+                  </button>
+
+                  <button
+                    disabled={aiLoading}
+                    onClick={() => callInline("smart")}
+                    className={[
+                      "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                      "hover:bg-accent transition",
+                      "disabled:opacity-60 disabled:cursor-not-allowed",
+                      aiTask === "smart" ? "border-ring shadow-[inset_0_0_0_1px_color-mix(in_oklab,hsl(var(--ring))_40%,transparent)]" : "border-border"
+                    ].join(" ")}
+                    title="Make SMART"
+                    aria-label="Make SMART"
+                  >
+                    <ListChecks className="h-4 w-4" />
+                    <span>Make SMART</span>
+                  </button>
+
+                  <button
+                    disabled={aiLoading}
+                    onClick={() => callInline("assumptions")}
+                    className={[
+                      "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                      "hover:bg-accent transition",
+                      "disabled:opacity-60 disabled:cursor-not-allowed",
+                      aiTask === "assumptions" ? "border-ring shadow-[inset_0_0_0_1px_color-mix(in_oklab,hsl(var(--ring))_40%,transparent)]" : "border-border"
+                    ].join(" ")}
+                    title="Assumptions"
+                    aria-label="Assumptions"
+                  >
+                    <FileQuestion className="h-4 w-4" />
+                    <span>Assumptions</span>
+                  </button>
+
+                  <button
+                    disabled={aiLoading}
+                    onClick={() => callInline("lint")}
+                    className={[
+                      "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                      "hover:bg-accent transition",
+                      "disabled:opacity-60 disabled:cursor-not-allowed",
+                      aiTask === "lint" ? "border-ring shadow-[inset_0_0_0_1px_color-mix(in_oklab,hsl(var(--ring))_40%,transparent)]" : "border-border"
+                    ].join(" ")}
+                    title="Lint"
+                    aria-label="Lint"
+                  >
+                    <ShieldAlert className="h-4 w-4" />
+                    <span>Lint</span>
+                  </button>
+              </div>
+
+
+              <div className="mt-2 text-xs text-muted-foreground">
+                {aiLoading ? "Running…" : aiTask ? `Last run: ${aiTask}` : "Idle"}
+              </div>
+              {aiError && <div className="mt-2 text-xs text-red-600">Error: {aiError}</div>}
+            </div>
+
+            {/* Result */}
+            {aiOut && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="font-medium">AI Result</div>
+                  <div className="flex items-center gap-1 text-xs">
+                    <span className="text-muted-foreground">View:</span>
+                    <button
+                      className={`px-2 py-0.5 rounded border ${!showRaw ? "border-ring" : "border-border"}`}
+                      onClick={() => setShowRaw(false)}
+                    >
+                      Rendered
+                    </button>
+                    <button
+                      className={`px-2 py-0.5 rounded border ${showRaw ? "border-ring" : "border-border"}`}
+                      onClick={() => setShowRaw(true)}
+                    >
+                      Raw
+                    </button>
+                  </div>
+                </div>
+
+                {!showRaw ? (
+                  <MarkdownCard markdown={aiOut} className="max-h-[36vh] overflow-auto" />
+                ) : (
+                  <pre className="text-xs whitespace-pre-wrap rounded-lg border border-border bg-muted/20 p-3 max-h-[36vh] overflow-auto">
+                    {aiOut}
+                  </pre>
+                )}
+
+                <div className="mt-2 flex gap-2">
+                  <button
+                    className="btn"
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(aiOut); } catch {}
+                    }}
+                  >
+                    Copy result
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* (Optional) context for transparency */}
+            <div className="pt-2">
+              <div className="font-medium mb-1">Section markdown (sent to agent)</div>
+              <pre className="text-xs whitespace-pre-wrap rounded-lg border border-border bg-muted/20 p-3 max-h-[28vh] overflow-auto">
+                {(() => {
+                  const sec = doc.sections.find(s => s.id === aiSectionId);
+                  return sec ? tiptapToMarkdown(sec.content).trim() : "";
+                })()}
+              </pre>
+            </div>
+
+            <div>
+              <div className="font-medium mb-1">Entire TDP (Markdown)</div>
+              <pre className="text-xs whitespace-pre-wrap rounded-lg border border-border bg-muted/20 p-3 max-h-[28vh] overflow-auto">
+                {buildTdpMarkdown(doc)}
+              </pre>
+            </div>
+          </div>
+      </AIGuidancePanel>
+
+
+
     </div>
   );
 }

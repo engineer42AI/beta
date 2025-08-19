@@ -48,12 +48,15 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/docs", label: "Docs", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
   {
-    label: "System B — Operational Context",
+    label: "Workflows",
     children: [
       { label: "TDP V1", href: "/system-c/technology-development-plan-V1", icon: Users },
       { label: "Stakeholders V1", href: "/system-b/stakeholders-V1", icon: Users },
       { label: "Stakeholders V2", href: "/system-b/stakeholders-V2", icon: Users },
       { label: "Browse cert spec V1", href: "/system-b/browse-cert-specs-V1", icon: Users },
+      { label: "Functional Ontology V1", href: "/system-a/functional-ontology-V1", icon: Users },
+      { label: "Functional Ontology V2", href: "/system-a/functional-ontology-V2", icon: Users },
+      { label: "Functional Ontology V3", href: "/system-a/functional-ontology-V3", icon: Users },
     ],
   },
 ];

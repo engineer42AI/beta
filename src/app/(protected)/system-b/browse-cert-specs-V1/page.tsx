@@ -1,4 +1,5 @@
 "use client";
+
 import React, { useEffect, useMemo, useState } from "react";
 import PdfViewer from "@/components/PdfViewer";
 
@@ -273,8 +274,6 @@ export default function RegulatoryExplorer() {
       const sec = (sectionLabel || sectionInput || "").replace(/^CS\s*/i, "").trim();
       return sec || "CS-25";
   }
-
-
 
   /** Load graph once */
   useEffect(() => {
