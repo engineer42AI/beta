@@ -39,48 +39,71 @@ jobs:
       - name: Deploy over SSH
         run: |
           ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -s' <<'REMOTE'
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -s' <<REMOTE
             set -euo pipefail
             cd /home/ubuntu/apps/beta
-            
-            : "${COGNITO_REDIRECT_URI:=${APP_BASE_URL}/api/auth/callback}"
-            : "${STRIPE_SUCCESS_URL:=${APP_BASE_URL}/success}"
-            : "${STRIPE_CANCEL_URL:=${APP_BASE_URL}/}"
-            
+      
+            # 1) Write .env.production using GitHub secrets (expanded on the runner)
             cat > .env.production <<EOF
-            APP_BASE_URL=${APP_BASE_URL}
-            COGNITO_DOMAIN=${COGNITO_DOMAIN}
-            COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
-            COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET}
-            COGNITO_REDIRECT_URI=${COGNITO_REDIRECT_URI}
-            AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-            AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-            AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-            STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-            STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL}
-            STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL}
-            STRIPE_PRODUCTID_STARTER=${STRIPE_PRODUCTID_STARTER}
-            STRIPE_PRODUCTID_PROFESSIONAL=${STRIPE_PRODUCTID_PROFESSIONAL}
-            STRIPE_PRODUCTID_ENTERPRISE=${STRIPE_PRODUCTID_ENTERPRISE}
-            OPENAI_API_KEY=${OPENAI_API_KEY}
+            APP_BASE_URL=${{ secrets.APP_BASE_URL }}
+            COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
+            COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
+            COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
+            COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}
+      
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
+      
+            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+            STRIPE_SUCCESS_URL=${{ secrets.STRIPE_SUCCESS_URL }}
+            STRIPE_CANCEL_URL=${{ secrets.STRIPE_CANCEL_URL }}
+            STRIPE_PRODUCTID_STARTER=${{ secrets.STRIPE_PRODUCTID_STARTER }}
+            STRIPE_PRODUCTID_PROFESSIONAL=${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
+            STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
+      
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             EOF
-            
+      
+            # 2) Load values and apply sane defaults if any are empty
+            set -a
+            . ./.env.production
+            set +a
+      
+            # Fallbacks computed on server (no GitHub expression logic)
+            if [ -z "\${COGNITO_REDIRECT_URI:-}" ]; then
+            echo "COGNITO_REDIRECT_URI=\${APP_BASE_URL}/api/auth/callback" >> .env.production
+            COGNITO_REDIRECT_URI="\${APP_BASE_URL}/api/auth/callback"
+            fi
+            if [ -z "\${STRIPE_SUCCESS_URL:-}" ]; then
+            echo "STRIPE_SUCCESS_URL=\${APP_BASE_URL}/success" >> .env.production
+            fi
+            if [ -z "\${STRIPE_CANCEL_URL:-}" ]; then
+            echo "STRIPE_CANCEL_URL=\${APP_BASE_URL}/" >> .env.production
+            fi
+      
+            echo "== .env.production (first lines) =="
             sed -n '1,8p' .env.production || true
-            
+      
+            # 3) Update code & build
             git fetch origin
             git checkout deploy
             git reset --hard origin/deploy
+      
             npm ci --ignore-scripts || npm install --ignore-scripts
             if [ -d node_modules/pdfjs-dist ]; then
-              mkdir -p public/pdfjs
-              cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
+            mkdir -p public/pdfjs
+            cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
             fi
             export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
+      
+            # 4) Restart services
             sudo systemctl restart beta-next
             sudo systemctl reload nginx
             sudo systemctl status beta-next --no-pager | tail -n +1
             REMOTE
+
         env:
           APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
           COGNITO_DOMAIN: ${{ secrets.COGNITO_DOMAIN }}
