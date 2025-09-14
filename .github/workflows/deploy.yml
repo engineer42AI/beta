@@ -1,35 +1,99 @@
-name: SSH Secret Smoke Test
+name: Deploy Beta App
+
 on:
+  push:
+    branches: [ deploy ]
   workflow_dispatch:
 
 jobs:
-  test:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Fail fast if SSH_HOST/SSH_USER missing
+      # 0) Fail fast if must-have secrets are missing (runner-side)
+      - name: Validate required secrets exist
         run: |
           set -euo pipefail
           test -n "${{ secrets.SSH_HOST }}" || (echo "::error::SSH_HOST missing" && exit 1)
           test -n "${{ secrets.SSH_USER }}" || (echo "::error::SSH_USER missing" && exit 1)
           test -n "${{ secrets.SSH_KEY }}"  || (echo "::error::SSH_KEY missing"  && exit 1)
-          echo "All required secrets are present."
+          test -n "${{ secrets.APP_BASE_URL }}" || (echo "::error::APP_BASE_URL missing" && exit 1)
+          test -n "${{ secrets.COGNITO_DOMAIN }}" || (echo "::error::COGNITO_DOMAIN missing" && exit 1)
+          test -n "${{ secrets.COGNITO_CLIENT_ID }}" || (echo "::error::COGNITO_CLIENT_ID missing" && exit 1)
+          test -n "${{ secrets.COGNITO_CLIENT_SECRET }}" || (echo "::error::COGNITO_CLIENT_SECRET missing" && exit 1)
+          test -n "${{ secrets.OPENAI_API_KEY }}" || (echo "::error::OPENAI_API_KEY missing" && exit 1)
 
-      - name: Write SSH private key to file (preserve newlines)
+      # 1) Write the SSH private key to a file (preserves newlines) and lock perms
+      - name: Prepare SSH key
         shell: bash
         run: |
-          set -euo pipefail
           umask 077
           cat > id_ci.pem <<'EOF'
           ${{ secrets.SSH_KEY }}
           EOF
-          # sanity checks without leaking the key
+          chmod 600 id_ci.pem
+          # quick sanity (won't leak): show header/footer & size
           head -n1 id_ci.pem
           tail -n1 id_ci.pem
           wc -c id_ci.pem
 
-      - name: Test SSH connectivity
+      # 2) Smoke-test SSH connectivity
+      - name: SSH smoke test
         shell: bash
         run: |
-          set -euxo pipefail
           ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'whoami && hostname && echo OK'
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            'whoami && hostname && test -d /home/ubuntu/apps/beta && echo OK'
+
+      # 3) Deploy: write env, pull, install, build, restart
+      - name: Deploy over SSH
+        shell: bash
+        run: |
+          ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -s' <<'REMOTE'
+            set -euo pipefail
+            cd /home/ubuntu/apps/beta
+            
+            # --- Write .env.production from GitHub Secrets (masked in logs by GH) ---
+            cat > .env.production <<EOF
+            APP_BASE_URL=${{ secrets.APP_BASE_URL }}
+            COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
+            COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
+            COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
+            COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI || secrets.APP_BASE_URL + "/api/auth/callback" }}
+            
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
+            
+            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+            STRIPE_SUCCESS_URL=${{ secrets.STRIPE_SUCCESS_URL || secrets.APP_BASE_URL + "/success" }}
+            STRIPE_CANCEL_URL=${{ secrets.STRIPE_CANCEL_URL || secrets.APP_BASE_URL + "/" }}
+            STRIPE_PRODUCTID_STARTER=${{ secrets.STRIPE_PRODUCTID_STARTER }}
+            STRIPE_PRODUCTID_PROFESSIONAL=${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
+            STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
+            
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            EOF
+            
+            # show only non-sensitive lines
+            sed -n '1,8p' .env.production || true
+            
+            # --- Update code & build ---
+            git fetch origin
+            git checkout deploy
+            git reset --hard origin/deploy
+            
+            # install (skip postinstall) and build with low memory
+            npm ci --ignore-scripts || npm install --ignore-scripts
+            if [ -d node_modules/pdfjs-dist ]; then
+              mkdir -p public/pdfjs
+              cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
+            fi
+            export NODE_OPTIONS="--max-old-space-size=1024"
+            npm run build
+            
+            # --- Restart services ---
+            sudo systemctl restart beta-next
+            sudo systemctl reload nginx
+            sudo systemctl status beta-next --no-pager | tail -n +1
+            REMOTE
