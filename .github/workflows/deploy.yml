@@ -39,11 +39,11 @@ jobs:
       - name: Deploy over SSH
         run: |
           ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -s' <<REMOTE
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -se' <<'REMOTE'
             set -euo pipefail
             cd /home/ubuntu/apps/beta
       
-            # 1) Write .env.production using GitHub secrets (expanded on the runner)
+            # 1) Write .env.production from GitHub secrets (expanded on the runner)
             cat > .env.production <<EOF
             APP_BASE_URL=${{ secrets.APP_BASE_URL }}
             COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
@@ -65,27 +65,10 @@ jobs:
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             EOF
       
-            # 2) Load values and apply sane defaults if any are empty
-            set -a
-            . ./.env.production
-            set +a
-      
-            # Fallbacks computed on server (no GitHub expression logic)
-            if [ -z "\${COGNITO_REDIRECT_URI:-}" ]; then
-            echo "COGNITO_REDIRECT_URI=\${APP_BASE_URL}/api/auth/callback" >> .env.production
-            COGNITO_REDIRECT_URI="\${APP_BASE_URL}/api/auth/callback"
-            fi
-            if [ -z "\${STRIPE_SUCCESS_URL:-}" ]; then
-            echo "STRIPE_SUCCESS_URL=\${APP_BASE_URL}/success" >> .env.production
-            fi
-            if [ -z "\${STRIPE_CANCEL_URL:-}" ]; then
-            echo "STRIPE_CANCEL_URL=\${APP_BASE_URL}/" >> .env.production
-            fi
-      
             echo "== .env.production (first lines) =="
             sed -n '1,8p' .env.production || true
       
-            # 3) Update code & build
+            # 2) Update code & build
             git fetch origin
             git checkout deploy
             git reset --hard origin/deploy
@@ -98,7 +81,7 @@ jobs:
             export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
       
-            # 4) Restart services
+            # 3) Restart services
             sudo systemctl restart beta-next
             sudo systemctl reload nginx
             sudo systemctl status beta-next --no-pager | tail -n +1
