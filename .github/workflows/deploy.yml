@@ -14,23 +14,21 @@ jobs:
           set -euo pipefail
           test -n "${{ secrets.SSH_HOST }}" || (echo "::error::SSH_HOST missing" && exit 1)
           test -n "${{ secrets.SSH_USER }}" || (echo "::error::SSH_USER missing" && exit 1)
-          test -n "${{ secrets.SSH_KEY }}"  || (echo "::error::SSH_KEY missing"  && exit 1)
+          test -n "${{ secrets.SSH_KEY_B64 }}" || (echo "::error::SSH_KEY_B64 missing" && exit 1)
           test -n "${{ secrets.APP_BASE_URL }}" || (echo "::error::APP_BASE_URL missing" && exit 1)
           test -n "${{ secrets.COGNITO_DOMAIN }}" || (echo "::error::COGNITO_DOMAIN missing" && exit 1)
           test -n "${{ secrets.COGNITO_CLIENT_ID }}" || (echo "::error::COGNITO_CLIENT_ID missing" && exit 1)
           test -n "${{ secrets.COGNITO_CLIENT_SECRET }}" || (echo "::error::COGNITO_CLIENT_SECRET missing" && exit 1)
           test -n "${{ secrets.OPENAI_API_KEY }}" || (echo "::error::OPENAI_API_KEY missing" && exit 1)
 
-      - name: Prepare SSH key
+      - name: Prepare SSH key (decode from base64)
         run: |
           umask 077
-          cat > id_ci.pem <<'EOF'
-          ${{ secrets.SSH_KEY }}
-          EOF
+          echo "${{ secrets.SSH_KEY_B64 }}" | base64 -d > id_ci.pem
           chmod 600 id_ci.pem
           head -n1 id_ci.pem
           tail -n1 id_ci.pem
-          wc -c id_ci.pem
+          echo "Size (bytes):"; wc -c id_ci.pem
 
       - name: SSH smoke test
         run: |
@@ -45,7 +43,6 @@ jobs:
             set -euo pipefail
             cd /home/ubuntu/apps/beta
             
-            # Fallback defaults handled here in shell, not YAML
             : "${COGNITO_REDIRECT_URI:=${APP_BASE_URL}/api/auth/callback}"
             : "${STRIPE_SUCCESS_URL:=${APP_BASE_URL}/success}"
             : "${STRIPE_CANCEL_URL:=${APP_BASE_URL}/}"
@@ -56,36 +53,30 @@ jobs:
             COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
             COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET}
             COGNITO_REDIRECT_URI=${COGNITO_REDIRECT_URI}
-            
             AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
             AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
             AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-            
             STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
             STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL}
             STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL}
             STRIPE_PRODUCTID_STARTER=${STRIPE_PRODUCTID_STARTER}
             STRIPE_PRODUCTID_PROFESSIONAL=${STRIPE_PRODUCTID_PROFESSIONAL}
             STRIPE_PRODUCTID_ENTERPRISE=${STRIPE_PRODUCTID_ENTERPRISE}
-            
             OPENAI_API_KEY=${OPENAI_API_KEY}
             EOF
             
-            head -n 8 .env.production || true
+            sed -n '1,8p' .env.production || true
             
             git fetch origin
             git checkout deploy
             git reset --hard origin/deploy
-            
             npm ci --ignore-scripts || npm install --ignore-scripts
             if [ -d node_modules/pdfjs-dist ]; then
               mkdir -p public/pdfjs
               cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
             fi
-            
             export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
-            
             sudo systemctl restart beta-next
             sudo systemctl reload nginx
             sudo systemctl status beta-next --no-pager | tail -n +1
