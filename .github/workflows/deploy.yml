@@ -2,51 +2,78 @@ name: Deploy Beta App
 
 on:
   push:
-    branches:
-      - deploy
+    branches: [ deploy ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          COGNITO_DOMAIN: ${{ secrets.COGNITO_DOMAIN }}
+          COGNITO_CLIENT_ID: ${{ secrets.COGNITO_CLIENT_ID }}
+          COGNITO_CLIENT_SECRET: ${{ secrets.COGNITO_CLIENT_SECRET }}
+          COGNITO_REDIRECT_URI: ${{ secrets.COGNITO_REDIRECT_URI }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_SUCCESS_URL: ${{ secrets.STRIPE_SUCCESS_URL }}
+          STRIPE_CANCEL_URL: ${{ secrets.STRIPE_CANCEL_URL }}
+          STRIPE_PRODUCTID_STARTER: ${{ secrets.STRIPE_PRODUCTID_STARTER }}
+          STRIPE_PRODUCTID_PROFESSIONAL: ${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
+          STRIPE_PRODUCTID_ENTERPRISE: ${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         with:
-          ssh-private-key: ${{ secrets.SSH_KEY }}
+          host: ${{ secrets.SSH_HOST }}        # e.g. beta.engineer42.ai or 13.41.55.84
+          username: ${{ secrets.SSH_USER }}    # ubuntu
+          key: ${{ secrets.SSH_KEY }}          # <-- the key you just added
+          script_stop: true
+          envs: APP_BASE_URL,COGNITO_DOMAIN,COGNITO_CLIENT_ID,COGNITO_CLIENT_SECRET,COGNITO_REDIRECT_URI,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,AWS_DEFAULT_REGION,STRIPE_SECRET_KEY,STRIPE_SUCCESS_URL,STRIPE_CANCEL_URL,STRIPE_PRODUCTID_STARTER,STRIPE_PRODUCTID_PROFESSIONAL,STRIPE_PRODUCTID_ENTERPRISE,OPENAI_API_KEY
+          script: |
+            set -euo pipefail
+            cd /home/ubuntu/apps/beta
 
-      - name: Deploy to server
-        run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@13.41.55.84 << 'EOF'
-            cd ~/apps/beta
+            # sanity: fail if any critical secret is empty
+            for v in APP_BASE_URL COGNITO_DOMAIN COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET AWS_DEFAULT_REGION OPENAI_API_KEY; do
+              [ -n "${!v:-}" ] || { echo "::error::$v is empty"; exit 1; }
+            done
+
             git fetch origin
+            git checkout deploy
             git reset --hard origin/deploy
 
-            # Write .env.production from GitHub secrets
-            cat > .env.production <<EOL
-            COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
-            COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
-            COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
-            APP_BASE_URL=${{ secrets.APP_BASE_URL }}
-            COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}
-            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
-            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
-            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
-            STRIPE_SUCCESS_URL=${{ secrets.STRIPE_SUCCESS_URL }}
-            STRIPE_CANCEL_URL=${{ secrets.STRIPE_CANCEL_URL }}
-            STRIPE_PRODUCTID_STARTER=${{ secrets.STRIPE_PRODUCTID_STARTER }}
-            STRIPE_PRODUCTID_PROFESSIONAL=${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
-            STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            EOL
+            # write .env.production from secrets
+            cat > .env.production <<'EOF'
+            APP_BASE_URL=${APP_BASE_URL}
+            COGNITO_DOMAIN=${COGNITO_DOMAIN}
+            COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+            COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET}
+            COGNITO_REDIRECT_URI=${COGNITO_REDIRECT_URI:-${APP_BASE_URL}/api/auth/callback}
 
-            npm install --production --ignore-scripts
+            AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+            AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+
+            STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+            STRIPE_SUCCESS_URL=${STRIPE_SUCCESS_URL:-${APP_BASE_URL}/success}
+            STRIPE_CANCEL_URL=${STRIPE_CANCEL_URL:-${APP_BASE_URL}/}
+            STRIPE_PRODUCTID_STARTER=${STRIPE_PRODUCTID_STARTER}
+            STRIPE_PRODUCTID_PROFESSIONAL=${STRIPE_PRODUCTID_PROFESSIONAL}
+            STRIPE_PRODUCTID_ENTERPRISE=${STRIPE_PRODUCTID_ENTERPRISE}
+
+            OPENAI_API_KEY=${OPENAI_API_KEY}
+            EOF
+
+            npm ci --ignore-scripts || npm install --ignore-scripts
+            if [ -d node_modules/pdfjs-dist ]; then
+              mkdir -p public/pdfjs
+              cp -r node_modules/pdfjs-dist/build node_modules/pdfjs-dist/web node_modules/pdfjs-dist/cmaps public/pdfjs/ || true
+            fi
+            export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
 
             sudo systemctl restart beta-next
             sudo systemctl reload nginx
-          EOF
