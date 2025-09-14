@@ -2,40 +2,39 @@ name: Deploy Beta App
 on:
   push:
     branches: [ deploy ]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      # 0) Quick SSH smoke test
       - name: SSH smoke test
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.SSH_HOST }}        # e.g. beta.engineer42.ai or 13.41.55.84
-          username: ${{ secrets.SSH_USER }}    # ubuntu
-          key: ${{ secrets.SSH_KEY }}          # your CI private key
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
           script_stop: true
           script: |
             set -euxo pipefail
+            echo "== whoami =="
             whoami
+            echo "== host =="
             hostname
-            uname -a
             test -d /home/ubuntu/apps/beta
 
-      # 1) Fail fast if required secrets are missing (runs on the runner)
       - name: Validate secrets present
         run: |
           set -euo pipefail
-          test -n "${{ secrets.APP_BASE_URL }}" || (echo "::error::APP_BASE_URL missing" && exit 1)
-          test -n "${{ secrets.COGNITO_DOMAIN }}" || (echo "::error::COGNITO_DOMAIN missing" && exit 1)
-          test -n "${{ secrets.COGNITO_CLIENT_ID }}" || (echo "::error::COGNITO_CLIENT_ID missing" && exit 1)
-          test -n "${{ secrets.COGNITO_CLIENT_SECRET }}" || (echo "::error::COGNITO_CLIENT_SECRET missing" && exit 1)
-          test -n "${{ secrets.AWS_DEFAULT_REGION }}" || (echo "::error::AWS_DEFAULT_REGION missing" && exit 1)
-          test -n "${{ secrets.OPENAI_API_KEY }}" || (echo "::error::OPENAI_API_KEY missing" && exit 1)
-      
+          for n in APP_BASE_URL COGNITO_DOMAIN COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET AWS_DEFAULT_REGION OPENAI_API_KEY; do
+            [ -n "${{ secrets.APP_BASE_URL }}" ] || { echo "::error::APP_BASE_URL missing"; exit 1; }
+            [ -n "${{ secrets.COGNITO_DOMAIN }}" ] || { echo "::error::COGNITO_DOMAIN missing"; exit 1; }
+            [ -n "${{ secrets.COGNITO_CLIENT_ID }}" ] || { echo "::error::COGNITO_CLIENT_ID missing"; exit 1; }
+            [ -n "${{ secrets.COGNITO_CLIENT_SECRET }}" ] || { echo "::error::COGNITO_CLIENT_SECRET missing"; exit 1; }
+            [ -n "${{ secrets.AWS_DEFAULT_REGION }}" ] || { echo "::error::AWS_DEFAULT_REGION missing"; exit 1; }
+            [ -n "${{ secrets.OPENAI_API_KEY }}" ] || { echo "::error::OPENAI_API_KEY missing"; exit 1; }
+          done
 
-      # 2) Write .env.production on the server
       - name: Write env file remotely
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -63,6 +62,7 @@ jobs:
           script: |
             set -euxo pipefail
             cd /home/ubuntu/apps/beta
+            echo "== writing .env.production =="
             cat > .env.production <<'EOF'
             APP_BASE_URL=${APP_BASE_URL}
             COGNITO_DOMAIN=${COGNITO_DOMAIN}
@@ -80,10 +80,8 @@ jobs:
             STRIPE_PRODUCTID_ENTERPRISE=${STRIPE_PRODUCTID_ENTERPRISE}
             OPENAI_API_KEY=${OPENAI_API_KEY}
             EOF
-            # show only first lines (no secrets)
             head -n 5 .env.production || true
 
-      # 3) Pull, install, build
       - name: Deploy build
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -94,18 +92,20 @@ jobs:
           script: |
             set -euxo pipefail
             cd /home/ubuntu/apps/beta
+            echo "== git pull =="
             git fetch origin
             git checkout deploy
             git reset --hard origin/deploy
+            echo "== install =="
             npm ci --ignore-scripts || npm install --ignore-scripts
             if [ -d node_modules/pdfjs-dist ]; then
               mkdir -p public/pdfjs
               cp -r node_modules/pdfjs-dist/build node_modules/pdfjs-dist/web node_modules/pdfjs-dist/cmaps public/pdfjs/ || true
             fi
+            echo "== build =="
             export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
 
-      # 4) Restart services
       - name: Restart app
         uses: appleboy/ssh-action@v1.2.0
         with:
