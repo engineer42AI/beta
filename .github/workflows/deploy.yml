@@ -37,66 +37,67 @@ jobs:
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             'whoami && hostname && echo "✅ SSH OK"'
 
-      - name: Deploy over SSH
+            - name: Deploy over SSH
         run: |
           ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -se' <<'REMOTE'
             set -euxo pipefail
             cd /home/ubuntu/apps/beta
-            
+
             echo "== Resetting repo to origin/deploy =="
             git fetch origin
             git checkout deploy
             git reset --hard origin/deploy
-            
+
             echo "== Removing heavy/old artifacts =="
             rm -rf node_modules .next public/pdfjs || true
-            
+
             echo "== Cleaning untracked files (keeping ignored like node_modules) =="
-            git clean -ffd || true   # don't fail the build if something can't be removed
-            
+            git clean -ffd || true
+
             echo "== Writing .env.production =="
-            cat > .env.production <<EOF
-            APP_BASE_URL=${{ secrets.APP_BASE_URL }}
-            COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
-            COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
-            COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
-            COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}
-            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
-            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
-            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
-            STRIPE_SUCCESS_URL=${{ secrets.STRIPE_SUCCESS_URL }}
-            STRIPE_CANCEL_URL=${{ secrets.STRIPE_CANCEL_URL }}
-            STRIPE_PRODUCTID_STARTER=${{ secrets.STRIPE_PRODUCTID_STARTER }}
-            STRIPE_PRODUCTID_PROFESSIONAL=${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
-            STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            EOF
+            cat > .env.production <<'ENV'
+APP_BASE_URL=${{ secrets.APP_BASE_URL }}
+COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
+COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
+COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
+COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}
+AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
+STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+STRIPE_SUCCESS_URL=${{ secrets.STRIPE_SUCCESS_URL }}
+STRIPE_CANCEL_URL=${{ secrets.STRIPE_CANCEL_URL }}
+STRIPE_PRODUCTID_STARTER=${{ secrets.STRIPE_PRODUCTID_STARTER }}
+STRIPE_PRODUCTID_PROFESSIONAL=${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
+STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
+OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+ENV
+
+            echo "== .env.production (first lines) =="
             sed -n '1,8p' .env.production || true
-            
+
             echo "== Commit being deployed =="
             git rev-parse --short HEAD
             git log -1 --oneline
-            
+
             echo "== Install (clean) =="
             npm ci --ignore-scripts
-            
-            # Optional: copy pdfjs assets if present
+
             if [ -d node_modules/pdfjs-dist ]; then
               mkdir -p public/pdfjs
               cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
             fi
-            
+
             echo "== Build =="
             export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
-            
+
             echo "== Restart services =="
             sudo systemctl restart beta-next
             sudo systemctl reload nginx
             sudo systemctl status beta-next --no-pager | tail -n +1
-            REMOTE
+REMOTE
 
         env:
           APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
