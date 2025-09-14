@@ -27,13 +27,13 @@ jobs:
       - name: Validate secrets present
         run: |
           set -euo pipefail
-          missing=0
-          for v in APP_BASE_URL COGNITO_DOMAIN COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET AWS_DEFAULT_REGION OPENAI_API_KEY; do
-            if [ -z "${{ secrets[format('{0}', v)] }}" ]; then
-              echo "::error::Secret $v is missing"; missing=1
-            fi
-          done
-          test $missing -eq 0
+          test -n "${{ secrets.APP_BASE_URL }}" || (echo "::error::APP_BASE_URL missing" && exit 1)
+          test -n "${{ secrets.COGNITO_DOMAIN }}" || (echo "::error::COGNITO_DOMAIN missing" && exit 1)
+          test -n "${{ secrets.COGNITO_CLIENT_ID }}" || (echo "::error::COGNITO_CLIENT_ID missing" && exit 1)
+          test -n "${{ secrets.COGNITO_CLIENT_SECRET }}" || (echo "::error::COGNITO_CLIENT_SECRET missing" && exit 1)
+          test -n "${{ secrets.AWS_DEFAULT_REGION }}" || (echo "::error::AWS_DEFAULT_REGION missing" && exit 1)
+          test -n "${{ secrets.OPENAI_API_KEY }}" || (echo "::error::OPENAI_API_KEY missing" && exit 1)
+      
 
       # 2) Write .env.production on the server
       - name: Write env file remotely
