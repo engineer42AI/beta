@@ -10,9 +10,10 @@ function b64(str: string) {
   return Buffer.from(str).toString("base64");
 }
 
-export async function exchangeCodeForTokens(code: string) {
+export async function exchangeCodeForTokens(code: string, redirectUri: string) {
   const tokenUrl = `${domain}/oauth2/token`;
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: clientId,
@@ -24,7 +25,7 @@ export async function exchangeCodeForTokens(code: string) {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      "Authorization": `Basic ${auth}`,
+      Authorization: `Basic ${auth}`,
     },
     body,
     cache: "no-store",
@@ -32,14 +33,11 @@ export async function exchangeCodeForTokens(code: string) {
 
   if (!res.ok) {
     const text = await res.text();
-    // ⬇️ This will show the precise error in your server logs
     console.error("Cognito token exchange failed:", res.status, text);
     throw new Error(`Token exchange failed ${res.status}`);
   }
 
-  return res.json() as Promise<{
-    access_token: string; id_token: string; refresh_token?: string; expires_in: number;
-  }>;
+  return res.json();
 }
 
 

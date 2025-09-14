@@ -19,7 +19,10 @@ export async function GET(req: Request) {
   if (!code) return NextResponse.redirect(nextAbs);
 
   try {
-    const tokens = await exchangeCodeForTokens(code);
+    const redirectUri =
+      process.env.COGNITO_REDIRECT_URI || `${url.origin}/api/auth/callback`;
+
+    const tokens = await exchangeCodeForTokens(code, redirectUri);
 
     const res = NextResponse.redirect(nextAbs);
     const exp = new Date(Date.now() + tokens.expires_in * 1000);
