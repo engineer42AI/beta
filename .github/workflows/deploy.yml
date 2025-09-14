@@ -8,18 +8,14 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Validate required secrets exist
         run: |
           set -euo pipefail
-          test -n "${{ secrets.SSH_HOST }}" || (echo "::error::SSH_HOST missing" && exit 1)
-          test -n "${{ secrets.SSH_USER }}" || (echo "::error::SSH_USER missing" && exit 1)
-          test -n "${{ secrets.SSH_KEY_B64 }}" || (echo "::error::SSH_KEY_B64 missing" && exit 1)
-          test -n "${{ secrets.APP_BASE_URL }}" || (echo "::error::APP_BASE_URL missing" && exit 1)
-          test -n "${{ secrets.COGNITO_DOMAIN }}" || (echo "::error::COGNITO_DOMAIN missing" && exit 1)
-          test -n "${{ secrets.COGNITO_CLIENT_ID }}" || (echo "::error::COGNITO_CLIENT_ID missing" && exit 1)
-          test -n "${{ secrets.COGNITO_CLIENT_SECRET }}" || (echo "::error::COGNITO_CLIENT_SECRET missing" && exit 1)
-          test -n "${{ secrets.OPENAI_API_KEY }}" || (echo "::error::OPENAI_API_KEY missing" && exit 1)
+          for s in SSH_HOST SSH_USER SSH_KEY_B64 APP_BASE_URL COGNITO_DOMAIN COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET OPENAI_API_KEY; do
+            test -n "${{ secrets[$s] }}" || (echo "::error::$s missing" && exit 1)
+          done
 
       - name: Prepare SSH key (decode from base64)
         run: |
@@ -30,58 +26,58 @@ jobs:
           tail -n1 id_ci.pem
           echo "Size (bytes):"; wc -c id_ci.pem
 
-      - name: SSH smoke test
+      - name: Smoke test SSH connection
         run: |
           ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            'whoami && hostname && test -d /home/ubuntu/apps/beta && echo OK'
+            'whoami && hostname && echo "✅ SSH OK"'
 
       - name: Deploy over SSH
         run: |
           ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -se' <<'REMOTE'
-            set -euo pipefail
+            set -euxo pipefail
             cd /home/ubuntu/apps/beta
-      
-            # 1) Write .env.production from GitHub secrets (expanded on the runner)
+
+            echo "== Resetting repo clean =="
+            git fetch origin
+            git checkout deploy
+            git reset --hard origin/deploy
+            git clean -fdx   # removes untracked files/dirs
+
+            echo "== Writing .env.production =="
             cat > .env.production <<EOF
             APP_BASE_URL=${{ secrets.APP_BASE_URL }}
             COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
             COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
             COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
             COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}
-      
             AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
             AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
-      
             STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
             STRIPE_SUCCESS_URL=${{ secrets.STRIPE_SUCCESS_URL }}
             STRIPE_CANCEL_URL=${{ secrets.STRIPE_CANCEL_URL }}
             STRIPE_PRODUCTID_STARTER=${{ secrets.STRIPE_PRODUCTID_STARTER }}
             STRIPE_PRODUCTID_PROFESSIONAL=${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
             STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
-      
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             EOF
-      
-            echo "== .env.production (first lines) =="
-            sed -n '1,8p' .env.production || true
-      
-            # 2) Update code & build
-            git fetch origin
-            git checkout deploy
-            git reset --hard origin/deploy
-      
+            head -n 8 .env.production || true
+
+            echo "== Installing dependencies =="
             npm ci --ignore-scripts || npm install --ignore-scripts
+
             if [ -d node_modules/pdfjs-dist ]; then
-            mkdir -p public/pdfjs
-            cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
+              mkdir -p public/pdfjs
+              cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
             fi
+
+            echo "== Building app =="
             export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
-      
-            # 3) Restart services
+
+            echo "== Restarting services =="
             sudo systemctl restart beta-next
             sudo systemctl reload nginx
             sudo systemctl status beta-next --no-pager | tail -n +1
