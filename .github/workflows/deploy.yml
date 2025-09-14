@@ -13,9 +13,14 @@ jobs:
       - name: Validate required secrets exist
         run: |
           set -euo pipefail
-          for s in SSH_HOST SSH_USER SSH_KEY_B64 APP_BASE_URL COGNITO_DOMAIN COGNITO_CLIENT_ID COGNITO_CLIENT_SECRET OPENAI_API_KEY; do
-            test -n "${{ secrets[$s] }}" || (echo "::error::$s missing" && exit 1)
-          done
+          [ -n "${{ secrets.SSH_HOST }}" ] || { echo "::error::SSH_HOST missing"; exit 1; }
+          [ -n "${{ secrets.SSH_USER }}" ] || { echo "::error::SSH_USER missing"; exit 1; }
+          [ -n "${{ secrets.SSH_KEY_B64 }}" ] || { echo "::error::SSH_KEY_B64 missing"; exit 1; }
+          [ -n "${{ secrets.APP_BASE_URL }}" ] || { echo "::error::APP_BASE_URL missing"; exit 1; }
+          [ -n "${{ secrets.COGNITO_DOMAIN }}" ] || { echo "::error::COGNITO_DOMAIN missing"; exit 1; }
+          [ -n "${{ secrets.COGNITO_CLIENT_ID }}" ] || { echo "::error::COGNITO_CLIENT_ID missing"; exit 1; }
+          [ -n "${{ secrets.COGNITO_CLIENT_SECRET }}" ] || { echo "::error::COGNITO_CLIENT_SECRET missing"; exit 1; }
+          [ -n "${{ secrets.OPENAI_API_KEY }}" ] || { echo "::error::OPENAI_API_KEY missing"; exit 1; }
 
       - name: Prepare SSH key (decode from base64)
         run: |
@@ -35,16 +40,16 @@ jobs:
       - name: Deploy over SSH
         run: |
           ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -se' <<'REMOTE'
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -se' <<REMOTE
             set -euxo pipefail
             cd /home/ubuntu/apps/beta
-
+            
             echo "== Resetting repo clean =="
             git fetch origin
             git checkout deploy
             git reset --hard origin/deploy
-            git clean -fdx   # removes untracked files/dirs
-
+            git clean -fdx   # remove untracked files/dirs (old configs, caches, node_modules, etc.)
+            
             echo "== Writing .env.production =="
             cat > .env.production <<EOF
             APP_BASE_URL=${{ secrets.APP_BASE_URL }}
@@ -63,20 +68,25 @@ jobs:
             STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             EOF
-            head -n 8 .env.production || true
-
+            sed -n '1,8p' .env.production || true
+            
+            echo "== Commit being deployed =="
+            git rev-parse --short HEAD
+            git log -1 --oneline
+            
             echo "== Installing dependencies =="
             npm ci --ignore-scripts || npm install --ignore-scripts
-
+            
+            # Optional: copy pdfjs assets if present
             if [ -d node_modules/pdfjs-dist ]; then
               mkdir -p public/pdfjs
               cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/ || true
             fi
-
+            
             echo "== Building app =="
             export NODE_OPTIONS="--max-old-space-size=1024"
             npm run build
-
+            
             echo "== Restarting services =="
             sudo systemctl restart beta-next
             sudo systemctl reload nginx
