@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { ResizablePanels, Panel, PanelResizeHandle } from "@/components/ui/ResizablePanels";
 import BottomConsole from "@/components/console/bottom-console";
-import { useConsoleStore } from "@/store/console-store";
+import { useConsoleStore } from "@/stores/console-store";
 import { Button } from "@/components/ui/button";
 
 function ConsoleBar(props: React.HTMLAttributes<HTMLDivElement>) {

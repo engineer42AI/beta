@@ -1,0 +1,13 @@
+{"caseStudyId":"hyflux","title":"HyFlux Superconducting Electric Motor","description":"Case study focusing on the cryogenic heat exchanger for a superconducting electric machine."}
+
+{"eventId":"1","type":"INIT_PROJECT","timestamp":"2025-08-20T10:00:00Z","payload":{"projectTitle":"HyFlux Superconducting Electric Motor","projectDescription":"Cryogenic HX for a superconducting propulsion motor."}}
+
+{"eventId":"2","type":"TDP_SET_SECTION","timestamp":"2025-08-20T10:00:01Z","payload":{"key":"notional_application","content":"A 20–40 passenger regional commuter aircraft using hybrid-electric propulsion with a superconducting propulsion motor. The cryogenic HX is part of the thermal management loop supporting HTS stator windings and power electronics."}}
+
+{"eventId":"3","type":"TDP_SET_SECTION","timestamp":"2025-08-20T10:00:02Z","payload":{"key":"technology_goals","content":"Deliver 2 MW class motor with >97% efficiency; cryogenic loop COP ≥ 0.06; HX ΔT ≤ 3 K at design mass flow; TRL 6 by 2028; mass ≤ 25 kg; pressure drop ≤ 0.15 bar."}}
+
+{"eventId":"4","type":"TDP_SET_SECTION","timestamp":"2025-08-20T10:00:03Z","payload":{"key":"technology_description","content":"Compact plate-fin cryogenic heat exchanger integrated with HTS stator cold-plate. Working fluid: gaseous helium at 20–40 K. Additive manufactured fins, high-conductivity alloy, embedded temperature/pressure sensors with redundant channels."}}
+
+{"eventId":"5","type":"TDP_SET_SECTION","timestamp":"2025-08-20T10:00:04Z","payload":{"key":"development_rationale","content":"Superconducting propulsion reduces conductor losses enabling higher power density. The HX is critical to maintain HTS operating temperature and protect against quench. Development targets manufacturability, icing/contamination tolerance, and maintainability."}}
+
+{"eventId":"6","type":"TDP_SET_SECTION","timestamp":"2025-08-20T10:00:05Z","payload":{"key":"technology_baseline","content":"Baseline architecture: single-loop He gas; turbocompressor + JT valve; HX effectiveness ≥ 0.9; 270 VDC bus to cryo-compressor; initial safety case addresses quench detection, venting, leak-before-burst, and DO-160 thermal/vibration."}}

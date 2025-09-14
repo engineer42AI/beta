@@ -42,13 +42,11 @@ const REL = {
 ----------------------------- */
 const ATA_CATEGORIES: { key: string; label: string; range: [number, number] }[] = [
   { key: "general",      label: "Aircraft General (00–19)", range: [0, 19] },
-  { key: "systems",      label: "Airframe Systems (20–49)", range: [20, 49] },
-  { key: "structures",   label: "Structures (50–57)",        range: [50, 57] },
+  { key: "systems",      label: "Airframe Systems (20–50)", range: [20, 50] },
+  { key: "structures",   label: "Structures (51–57)",        range: [51, 57] },
   { key: "propsrotors",  label: "Propellers/Rotors (60–67)", range: [60, 67] },
   { key: "powerplant",   label: "Power Plant (70–85)",       range: [70, 85] },
-  { key: "misc",          label: "Miscellaneous (80–89)",     range: [80, 89] },
-  { key: "manufacturer", label: "Manufacturer’s (90–97)",    range: [90, 97] },
-  { key: "reserved",      label: "Reserved (98–99)",          range: [98, 99] },
+  { key: "misc",          label: "Miscellaneous (91–116)",     range: [91, 116] },
 ];
 
 /* -----------------------------

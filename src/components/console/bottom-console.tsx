@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useConsoleStore, type ToolId } from "@/store/console-store";
+import { useConsoleStore, type ToolId } from "@/stores/console-store";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Plus, X, Bot, ListTree, TerminalSquare, ClipboardList, ChevronLeft, ChevronRight } from "lucide-react";

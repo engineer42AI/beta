@@ -1,0 +1,6 @@
+{"projectId": "FChex-001", "title": "HEx for FCs", "description": "A case study for main radiators on FC powered aircraft."}
+{"eventId": "1", "type": "INIT", "timestamp": "2025-08-20T10:00:00Z"}
+{"eventId": "2", "type": "ADD_NODE", "node": {"id": "TDP", "label": "Technology Development Plan"}}
+{"eventId": "3", "type": "ADD_NODE", "node": {"id": "SYS-A", "label": "System A – Product"}}
+{"eventId": "4", "type": "ADD_NODE", "node": {"id": "SYS-B", "label": "System B – Environment"}}
+{"eventId": "5", "type": "ADD_NODE", "node": {"id": "SYS-C", "label": "System C – Enterprise"}}

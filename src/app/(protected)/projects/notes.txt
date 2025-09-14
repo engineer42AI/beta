@@ -1,0 +1,3 @@
+manage projects using Zustand
+
+the api routes client to the backend

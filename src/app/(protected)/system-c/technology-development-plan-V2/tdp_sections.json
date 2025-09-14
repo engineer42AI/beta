@@ -1,0 +1,62 @@
+[
+  {
+    "key": "notional_application",
+    "title": "Notional Application",
+    "description_md": "The Notional Application defines the representative product or system context where the technology will be used. It should give a clear picture of *what kind of platform the technology is aimed at* and *how it fits into that platform*.\n\n**What to Capture:**\n- **Reference Platform:** Type of product or system (e.g., single-aisle aircraft, regional jet, UAV).\n- **Intended Use:** Where the technology will be applied (e.g., propulsion cooling, structural component, avionics).\n- **Key Drivers:** Main constraints/demands (e.g., weight, power/thermal loads, space, maintainability).\n\n**Purpose:** Ground development in a realistic, product-relevant context so goals and success criteria are meaningful.",
+    "tiptap_doc": {
+      "type": "doc",
+      "content": [
+        { "type": "heading", "attrs": { "level": 1 }, "content": [{ "type": "text", "text": "Notional Application" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "<describe the representative platform and where the tech fits>" }] }
+      ]
+    }
+  },
+  {
+    "key": "technology_goals",
+    "title": "Technology Goals",
+    "description_md": "Define what the technology must achieve to be successful—clear, measurable targets for performance, maturity, and integration.\n\n**What to Capture:**\n- **Performance Targets:** Quant/qual goals (efficiency, weight reduction, heat rejection, durability).\n- **Maturity Targets:** TRL/MRL at milestones.\n- **Integration Objectives:** How it interfaces or improves the platform.\n- **Timeframe:** When goals are expected to be reached.\n\n**Purpose:** Provide unambiguous success criteria that guide development and enable progress assessment.",
+    "tiptap_doc": {
+      "type": "doc",
+      "content": [
+        { "type": "heading", "attrs": { "level": 1 }, "content": [{ "type": "text", "text": "Technology Goals & Objectives" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "<set SMART goals, target TRL/MRL, timeframe>" }] }
+      ]
+    }
+  },
+  {
+    "key": "technology_description",
+    "title": "Technology Description",
+    "description_md": "Explain the concept: what it is, how it works at a high level, and what makes it different from current solutions.\n\n**What to Capture:**\n- **Concept Overview**\n- **Operating Principle**\n- **Differentiators**\n- **Dependencies**\n\n**Purpose:** Establish a clear baseline for understanding goals, risks, and development activities.",
+    "tiptap_doc": {
+      "type": "doc",
+      "content": [
+        { "type": "heading", "attrs": { "level": 1 }, "content": [{ "type": "text", "text": "Technology Description" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "<plain-language description, principle, novelty, dependencies>" }] }
+      ]
+    }
+  },
+  {
+    "key": "development_rationale",
+    "title": "Development Rationale",
+    "description_md": "Why this technology? State the problem, benefits, and why this approach is preferable to alternatives.\n\n**What to Capture:**\n- **Problem Statement**\n- **Value Proposition** (performance, cost, sustainability, reliability)\n- **Comparative Advantage**\n- **Strategic Alignment**\n\n**Purpose:** Justify investment and priority versus alternatives.",
+    "tiptap_doc": {
+      "type": "doc",
+      "content": [
+        { "type": "heading", "attrs": { "level": 1 }, "content": [{ "type": "text", "text": "Development Rationale" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "<why develop this; problem, value, advantage, alignment>" }] }
+      ]
+    }
+  },
+  {
+    "key": "technology_baseline",
+    "title": "Technology Baseline",
+    "description_md": "State current maturity, the evidence supporting it, and gaps to reach target TRL/MRL.\n\n**What to Capture:**\n- **Current TRL/MRL**\n- **Supporting Evidence** (tests, models, demos)\n- **Gaps & Limitations**\n- **Target Readiness**\n\n**Purpose:** Establish a realistic starting point for planning and measuring progress.",
+    "tiptap_doc": {
+      "type": "doc",
+      "content": [
+        { "type": "heading", "attrs": { "level": 1 }, "content": [{ "type": "text", "text": "Technology Readiness Baseline" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "<current TRL/MRL, evidence, gaps, target>" }] }
+      ]
+    }
+  }
+]
