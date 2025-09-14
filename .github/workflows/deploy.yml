@@ -1,0 +1,52 @@
+name: Deploy Beta App
+
+on:
+  push:
+    branches:
+      - deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy to server
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@13.41.55.84 << 'EOF'
+            cd ~/apps/beta
+            git fetch origin
+            git reset --hard origin/deploy
+
+            # Write .env.production from GitHub secrets
+            cat > .env.production <<EOL
+            COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
+            COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
+            COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
+            APP_BASE_URL=${{ secrets.APP_BASE_URL }}
+            COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_DEFAULT_REGION=${{ secrets.AWS_DEFAULT_REGION }}
+            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+            STRIPE_SUCCESS_URL=${{ secrets.STRIPE_SUCCESS_URL }}
+            STRIPE_CANCEL_URL=${{ secrets.STRIPE_CANCEL_URL }}
+            STRIPE_PRODUCTID_STARTER=${{ secrets.STRIPE_PRODUCTID_STARTER }}
+            STRIPE_PRODUCTID_PROFESSIONAL=${{ secrets.STRIPE_PRODUCTID_PROFESSIONAL }}
+            STRIPE_PRODUCTID_ENTERPRISE=${{ secrets.STRIPE_PRODUCTID_ENTERPRISE }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            EOL
+
+            npm install --production --ignore-scripts
+            npm run build
+
+            sudo systemctl restart beta-next
+            sudo systemctl reload nginx
+          EOF
