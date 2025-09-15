@@ -12,9 +12,11 @@ export function GET(req: Request) {
     return new NextResponse("Cognito not configured", { status: 500 });
   }
 
-  const origin = url.origin;
+  // Always prefer the configured base, not url.origin
+  const appBase = process.env.APP_BASE_URL?.replace(/\/+$/, "") || url.origin;
   const redirectUri =
-    process.env.COGNITO_REDIRECT_URI || `${origin}/api/auth/callback`;
+    process.env.COGNITO_REDIRECT_URI ||
+    `${appBase}/api/auth/callback`;
 
   const login =
     `${domain}/login?client_id=${encodeURIComponent(clientId)}` +

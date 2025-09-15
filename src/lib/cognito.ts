@@ -1,16 +1,19 @@
-// src/lib/cognito.ts
 import { cookies } from "next/headers";
 
 const domain = process.env.COGNITO_DOMAIN!;
 const clientId = process.env.COGNITO_CLIENT_ID!;
 const clientSecret = process.env.COGNITO_CLIENT_SECRET!;
-const redirectUri = process.env.COGNITO_REDIRECT_URI!;
+
+// Prefer env but fall back to APP_BASE_URL + `/api/auth/callback`
+const redirectUri =
+  process.env.COGNITO_REDIRECT_URI ||
+  `${process.env.APP_BASE_URL}/api/auth/callback`;
 
 function b64(str: string) {
   return Buffer.from(str).toString("base64");
 }
 
-export async function exchangeCodeForTokens(code: string, redirectUri: string) {
+export async function exchangeCodeForTokens(code: string, overrideRedirectUri?: string) {
   const tokenUrl = `${domain}/oauth2/token`;
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
@@ -18,7 +21,7 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string) {
     grant_type: "authorization_code",
     client_id: clientId,
     code,
-    redirect_uri: redirectUri,
+    redirect_uri: overrideRedirectUri || redirectUri,  // <= prefer passed-in, else env
   });
 
   const res = await fetch(tokenUrl, {
@@ -40,13 +43,12 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string) {
   return res.json();
 }
 
-
 export async function refreshTokens(refreshToken: string) {
   const res = await fetch(`${domain}/oauth2/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      "Authorization": `Basic ${b64(`${clientId}:${clientSecret}`)}`
+      Authorization: `Basic ${b64(`${clientId}:${clientSecret}`)}`,
     },
     body: new URLSearchParams({
       grant_type: "refresh_token",
@@ -61,7 +63,10 @@ export async function refreshTokens(refreshToken: string) {
 
 export function decodeJwt<T = any>(jwt: string): T {
   const [, payload] = jwt.split(".");
-  const json = Buffer.from(payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, "="), "base64").toString("utf8");
+  const json = Buffer.from(
+    payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, "="),
+    "base64"
+  ).toString("utf8");
   return JSON.parse(json);
 }
 
@@ -78,16 +83,23 @@ export async function getUserInfo(accessToken: string) {
 const cookieOpts = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/" };
 
 export function setAuthCookies(tokens: {
-  access_token: string; id_token: string; refresh_token?: string; expires_in: number;
+  access_token: string;
+  id_token: string;
+  refresh_token?: string;
+  expires_in: number;
 }) {
   const c = cookies();
   const exp = new Date(Date.now() + tokens.expires_in * 1000);
   c.set("e42_at", tokens.access_token, { ...cookieOpts, expires: exp });
-  c.set("e42_it", tokens.id_token,    { ...cookieOpts, expires: exp });
-  if (tokens.refresh_token) c.set("e42_rt", tokens.refresh_token, { ...cookieOpts, expires: new Date(Date.now() + 30*24*3600*1000) });
+  c.set("e42_it", tokens.id_token, { ...cookieOpts, expires: exp });
+  if (tokens.refresh_token)
+    c.set("e42_rt", tokens.refresh_token, {
+      ...cookieOpts,
+      expires: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+    });
 }
 
 export function clearAuthCookies() {
   const c = cookies();
-  ["e42_at","e42_it","e42_rt"].forEach(name => c.delete(name));
+  ["e42_at", "e42_it", "e42_rt"].forEach((name) => c.delete(name));
 }

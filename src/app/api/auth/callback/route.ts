@@ -11,16 +11,17 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
 
-  // Sanitize `state` (next URL): allow only same-site paths
+  // Prefer configured base; never rely solely on url.origin behind proxies
+  const appBase = (process.env.APP_BASE_URL || url.origin).replace(/\/+$/, "");
   const rawNext = url.searchParams.get("state") || "/overview";
   const nextPath = rawNext.startsWith("/") ? rawNext : "/overview";
-  const nextAbs = new URL(nextPath, url.origin);  // <-- make it absolute
+  const nextAbs = new URL(nextPath, appBase);
 
   if (!code) return NextResponse.redirect(nextAbs);
 
   try {
     const redirectUri =
-      process.env.COGNITO_REDIRECT_URI || `${url.origin}/api/auth/callback`;
+      process.env.COGNITO_REDIRECT_URI || `${appBase}/api/auth/callback`;
 
     const tokens = await exchangeCodeForTokens(code, redirectUri);
 
@@ -38,7 +39,7 @@ export async function GET(req: Request) {
     return res;
   } catch (err) {
     console.error("Cognito token exchange failed:", err);
-    // also use absolute URL here
-    return NextResponse.redirect(new URL("/", url.origin));
+    // Use APP_BASE_URL instead of url.origin here too
+    return NextResponse.redirect(new URL("/", appBase));
   }
 }
