@@ -1,0 +1,34 @@
+# CS-25 Graph Corpus
+Engineer42 – Regulatory Analysis Dataset
+
+## Purpose
+This folder contains the CS-25 graph corpus used by the Engineer42 platform.
+It encodes the complete CS-25 regulatory structure (sections, paragraphs, traces, intents, and citations) in a machine-readable format, with a manifest that describes version, integrity, and entrypoints.
+
+## Contents
+- manifest.json   → metadata (version, checksum, integrity, entrypoints)
+- nodes/          → JSONL files, each representing a category of nodes:
+    • regulation.jsonl          (top-level regulation document structure)
+    • paragraphs.jsonl          (bottom-level regulatory paragraphs)
+    • traces.jsonl              (trace nodes for bottom paragraphs)
+    • traceIntent.jsonl         (intents connected to traces)
+    • sectionIntent.jsonl       (intents connected to sections)
+- edges/          → JSONL files capturing relationships:
+    • regulation.jsonl          (document hierarchy edges)
+    • paragraphs.jsonl          (paragraph containment)
+    • traces.jsonl              (paragraph → trace)
+    • traceIntent.jsonl         (trace → intent)
+    • sectionIntent.jsonl       (section → intent)
+    • CITES.jsonl               (citation links between sections/paragraphs)
+- index.json      → fast lookup of section/paragraph numbers to UUIDs
+- utils.ts        → helper code to load the graph, validate integrity, and provide GraphOps functions
+- memo.txt        → this file (human-readable notes)
+
+## Notes
+- Integrity: the graph bundle should be validated against the checksum in manifest.json before loading.
+- Versioning: version number and revision date are tracked in manifest.json, not in folder names.
+- Scope: this corpus covers EASA CS-25. Other corpuses (e.g., CS-23) should use the same folder structure.
+- Maintenance: when updating the corpus, regenerate the index.json and recompute the checksum in manifest.json.
+
+## Build History
+- 2025-09-01: Initial CS-25 corpus export (v1.0.0) with ~2,740 traces and intents.

@@ -1,0 +1,12 @@
+your-project/
+└─ backend/
+   ├─ requirements.txt
+   ├─ .env                       # OPENAI_API_KEY=...
+   └─ app/
+      ├─ main.py                 # FastAPI app + routes
+      ├─ routers/                # HTTP endpoints
+      │  └─ agents.py            # POST /api/agents/{name}/run
+      └─ agents/                 # 1 file = 1 agent (all-in-one)
+         ├─ relevance_agent.py
+         ├─ fmea_agent.py
+         └─ __init__.py          # registry = {"relevance": RelevanceAgent(), ...}

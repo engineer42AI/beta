@@ -1,0 +1,42 @@
+{
+  "uuid": "corp-cs25",
+  "name": "EASA CS-25 Graph",
+  "scope": "CS-25",
+  "version": "v1.0.0",
+  "created_at": "2025-09-01T12:00:00Z",
+  "created_by": "engineer42",
+  "description": "Graph representation of EASA CS-25 regulations including sections, paragraphs, traces, and intents.",
+  "toc_root": "sec:CS25",
+  "bundle": {
+    "nodes": [
+      "nodes/NODES_regulation_JUL2025_V1.jsonl",
+      "nodes/NODES_regulation_JUL2025_paragraphs_V1.jsonl",
+      "nodes/NODES_regulation_JUL2025_traces_V1.jsonl",
+      "nodes/NODES_regulation_JUL2025_traceIntent_V1.jsonl",
+      "nodes/NODES_regulation_JUL2025_sectionIntent_V1.jsonl"
+    ],
+    "edges": [
+      "edges/EDGES_regulation_JUL2025_V1.jsonl",
+      "edges/EDGES_regulation_JUL2025_paragraphs_V1.jsonl",
+      "edges/EDGES_regulation_JUL2025_traces_V1.jsonl",
+      "edges/EDGES_regulation_JUL2025_traceIntent_V1.jsonl",
+      "edges/EDGES_regulation_JUL2025_sectionIntent_V1.jsonl",
+      "edges/EDGES_regulation_JUL2025_CITES_V1.jsonl"
+    ]
+  },
+  "tools": [
+    "OpenByRef",
+    "LocalSearch"
+  ],
+  "integrity": {
+    "checksum": "sha256:b5f3745e4165eb39bc4b1d3b4981901399d41883f71816046a9bf5f7e845960e",
+    "content_rev": "2025-09-27T17:16:34Z"
+  },
+  "stats": {
+    "documents": 1,
+    "sections": 440,
+    "paragraphs": 2700,
+    "traces": 2700,
+    "intents": 2700
+  }
+}
