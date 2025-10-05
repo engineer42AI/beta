@@ -1,5 +1,6 @@
-os
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 openai
+networkx
+python-dotenv

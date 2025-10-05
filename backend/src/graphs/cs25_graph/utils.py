@@ -14,7 +14,9 @@ from typing import Dict, List, Any, Optional, Union
 import networkx as nx
 from datetime import datetime
 import textwrap
-
+from typing import Deque, Iterable
+from collections import defaultdict, deque
+from typing import Dict, Any, List, Optional, Tuple
 class ManifestGraph:
     """
     One class to:
@@ -332,13 +334,18 @@ class GraphOps:
             *,
             include_uuids: bool = True,
             fields: List[str],  # REQUIRED
-            labels: Optional[Dict[str, str]] = None,  # optional pretty labels
+            labels: Optional[Dict[str, str]] = None,
+            include_levels: Optional[List[str]] = None,  # ["section"], ["trace"], ["section","trace"]
     ) -> str:
         """
         Markdown-format intents grouped by the node they attach to.
 
         - Only renders keys explicitly listed in `fields`.
         - `labels`: optional pretty labels for keys; defaults to Title Case of key.
+        - `include_levels`: control which intents are shown.
+           "section" → Section-level intent(s)
+           "trace"   → Bottom paragraph intent only
+           If None/blank, defaults to ["trace"].
         """
 
         def pretty_label(k: str) -> str:
@@ -353,45 +360,95 @@ class GraphOps:
                 if not val:
                     return []
                 out = [f"- **{pretty_label(key)}:**"]
-                for item in val:
-                    out.append(f"  - {self._md_escape(str(item))}")
+                out += [f"  - {self._md_escape(str(item))}" for item in val]
                 return out
             if isinstance(val, dict):
                 if not val:
                     return []
                 out = [f"- **{pretty_label(key)}:**"]
-                for dk, dv in val.items():
-                    out.append(f"  - **{self._md_escape(str(dk))}:** {self._md_escape(str(dv))}")
+                out += [f"  - **{self._md_escape(str(dk))}:** {self._md_escape(str(dv))}" for dk, dv in val.items()]
                 return out
             return [f"- **{pretty_label(key)}:** {self._md_escape(str(val))}"]
 
         lines: List[str] = ["## 🔵 Intent within this trace", ""]
-        intents_by_node = {b["uuid_node"]: b for b in (intents or [])}
+        intents_by_node = {b.get("uuid_node"): b for b in (intents or []) if b.get("uuid_node")}
 
         if not intents_by_node:
             lines.append("> *(no intents)*")
-            lines.append("")
             return "\n".join(lines)
 
-        for node in trace:
-            nid, ntype = node.get("uuid"), node.get("ntype")
-            if not nid or nid not in intents_by_node:
-                continue
+        # --- normalize include_levels ---
+        valid_levels = {"section", "trace"}
+        if not include_levels:
+            include_levels = ["trace"]
+        else:
+            include_levels = [
+                                 (lvl or "").strip().lower() for lvl in include_levels
+                                 if (lvl or "").strip().lower() in valid_levels
+                             ] or ["trace"]
 
+        # --- pick nodes to render (preserve requested order, dedupe) ---
+        nodes_to_render: List[Dict] = []
+        seen_uuids = set()
+
+        # helper: prefer a Section in TRACE that HAS an intent; else take first Section from INTENTS
+        def pick_section_node() -> Optional[Dict]:
+            # prefer a Section node present in trace AND in intents
+            for n in trace:
+                if n.get("ntype") == "Section" and n.get("uuid") in intents_by_node:
+                    return n
+            # fallback: any Section from intents list
+            for i in intents:
+                if i.get("ntype") == "Section":
+                    return {
+                        "uuid": i.get("uuid_node"),
+                        "ntype": "Section",
+                        "label": i.get("label") or "Section",
+                    }
+            return None
+
+        def pick_bottom_paragraph() -> Optional[Dict]:
+            return next((n for n in reversed(trace) if n.get("ntype") == "Paragraph"), None)
+
+        for level in include_levels:
+            if level == "section":
+                section_node = pick_section_node()
+                if section_node:
+                    uuid = section_node.get("uuid")
+                    if uuid and uuid in intents_by_node and uuid not in seen_uuids:
+                        nodes_to_render.append(section_node);
+                        seen_uuids.add(uuid)
+            elif level == "trace":
+                bottom_para = pick_bottom_paragraph()
+                if bottom_para:
+                    uuid = bottom_para.get("uuid")
+                    if uuid and uuid in intents_by_node and uuid not in seen_uuids:
+                        nodes_to_render.append(bottom_para);
+                        seen_uuids.add(uuid)
+
+        if not nodes_to_render:
+            lines.append("> *(no matching intents)*")
+            return "\n".join(lines)
+
+        # --- render ---
+        for node in nodes_to_render:
+            nid, ntype = node.get("uuid"), node.get("ntype")
             header_val = node.get("paragraph_id") if ntype == "Paragraph" else node.get("label")
             h = f"### {ntype}: {self._md_escape(header_val)}"
             if include_uuids:
                 h += f"\n`uuid: {nid}`"
             lines += [h, ""]
 
-            for it in intents_by_node[nid].get("intents", []):
+            # render only whitelisted fields
+            node_intents = intents_by_node[nid].get("intents", [])
+            for it in node_intents:
                 rendered_any = False
-                for key in fields:  # only those explicitly provided
+                for key in fields:
                     if key in it and it[key] not in (None, "", [], {}):
                         lines.extend(render_value(key, it[key]))
                         rendered_any = True
                 if rendered_any:
-                    lines.append("")  # spacing between entries
+                    lines.append("")
 
         return "\n".join(lines)
 
@@ -704,21 +761,15 @@ class GraphOps:
         intents_by_node: Dict[str, Dict[str, Any]] = {}
 
         def add(uuid_node: str, ntype: str, intent_node: Dict[str, Any]):
-            bucket = intents_by_node.setdefault(uuid_node, {"uuid_node": uuid_node, "ntype": ntype, "intents": []})
-            # Normalize two intent schemas into one
-            if "section_intent" in intent_node or "ai_notes" in intent_node:
-                bucket["intents"].append({
-                    "uuid_intent": intent_node.get("uuid"),
-                    "section_intent": intent_node.get("section_intent"),
-                    "ai_notes": intent_node.get("ai_notes"),
-                })
-            else:
-                bucket["intents"].append({
-                    "uuid_intent": intent_node.get("uuid"),
-                    "intent": intent_node.get("intent"),
-                    "expert_notes": intent_node.get("expert_notes"),
-                    "events": intent_node.get("events"),
-                })
+            bucket = intents_by_node.setdefault(
+                uuid_node, {"uuid_node": uuid_node, "ntype": ntype, "intents": []}
+            )
+            bucket["intents"].append({
+                "uuid_intent": intent_node.get("uuid"),
+                "intent": intent_node.get("intent"),
+                "summary": intent_node.get("summary"),
+                "events": intent_node.get("events"),
+            })
 
         # 1) HAS_INTENT from any node in trace
         for rec in trace:
@@ -773,3 +824,466 @@ class GraphOps:
             initial_indent=" " * indent,
             subsequent_indent=" " * indent,
         )
+
+    # ---------------------------------------------------------------------
+    # Frontend Outline Builder - mirror CS25 outline
+    # ---------------------------------------------------------------------
+    def build_outline_for_frontend(self) -> tuple[dict, dict]:
+        """
+        Build a stable, nested outline of the document hierarchy suitable for a UI.
+        Returns: (outline_tree, indices)
+        """
+        G = self.G
+        if G is None or len(G) == 0:
+            return {}, {"uuid_to_node": {}, "uuid_to_path": {}, "bottom_uuid_to_path": {}}
+
+        from collections import defaultdict
+        import re
+
+        # --- roots: Documents (or indegree==0 fallback) ---
+        doc_nodes = [nid for nid, d in G.nodes(data=True) if d.get("ntype") == "Document"]
+        if not doc_nodes:
+            doc_nodes = [nid for nid in G.nodes() if G.in_degree(nid) == 0]
+
+        # --- helpers --------------------------------------------------------------
+
+        def _add_child(parent: dict, child: dict) -> None:
+            parent.setdefault("children", []).append(child)
+
+        # Natural sort for sections / paragraphs
+        _ROMAN = {
+            'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5, 'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10,
+            'xi': 11, 'xii': 12, 'xiii': 13, 'xiv': 14, 'xv': 15, 'xvi': 16, 'xvii': 17, 'xviii': 18, 'xix': 19,
+            'xx': 20
+        }
+        INF = 10 ** 9
+
+        def _parse_first_section_pair(s: str) -> tuple[int, int]:
+            """Extract (25, 20) from 'CS 25.20 Scope' or '25.20' etc."""
+            if not s:
+                return (INF, INF)
+            m = re.search(r'(\d+)\.(\d+)', s)
+            if m:
+                return (int(m.group(1)), int(m.group(2)))
+            return (INF, INF)
+
+        def _paragraph_key_from_pid(pid: str) -> tuple:
+            """Natural sort for paragraph ids like 25.20(b)(1)(i)."""
+            m = re.match(r'^\s*(\d+)\.(\d+)(.*)$', pid or "")
+            if not m:
+                return (INF, INF, ())
+            major, minor, rest = int(m.group(1)), int(m.group(2)), m.group(3)
+            toks = re.findall(r'\(([^)]+)\)', rest)
+
+            def tok_key(t: str) -> tuple:
+                t = t.strip()
+                if t.isdigit():
+                    return (0, int(t))
+                tl = t.lower()
+                if tl in _ROMAN:
+                    return (1, _ROMAN[tl])
+                if len(t) == 1 and t.isalpha():
+                    return (2, ord(t.lower()) - ord('a'))
+                return (3, t)
+
+            return (major, minor, tuple(tok_key(t) for t in toks))
+
+        # Gather children by CONTAINS for quick traversal
+        contains_children: dict[str, list[str]] = defaultdict(list)
+        for u, v, edata in G.edges(data=True):
+            if edata.get("relation") == "CONTAINS":
+                contains_children[u].append(v)
+
+        # Precompute each Section's numeric key
+        section_key: dict[str, tuple[int, int]] = {}
+        for nid, d in G.nodes(data=True):
+            if d.get("ntype") == "Section":
+                # prefer 'number'; fall back to 'label' if needed
+                key = _parse_first_section_pair(d.get("number") or d.get("label") or "")
+                section_key[nid] = key
+
+        # Compute the minimal section key under a node's subtree (memoized)
+        memo_min_key: dict[str, tuple[int, int]] = {}
+
+        def min_section_key(nid: str) -> tuple[int, int]:
+            if nid in memo_min_key:
+                return memo_min_key[nid]
+            d = G.nodes.get(nid, {})
+            ntype = d.get("ntype")
+
+            if ntype == "Section":
+                val = section_key.get(nid, (INF, INF))
+                memo_min_key[nid] = val
+                return val
+
+            best = (INF, INF)
+            for child in contains_children.get(nid, []):
+                ck = min_section_key(child)
+                if ck < best:
+                    best = ck
+            memo_min_key[nid] = best
+            return best
+
+        # Sorting keys (now driven by min_section_key where it matters)
+        def _section_sort_key(nid: str) -> tuple:
+            # direct numeric section key, fallback keeps label/title stable
+            key = section_key.get(nid, (INF, INF))
+            d = G.nodes.get(nid, {})
+            return (*key, d.get("label") or "", d.get("title") or "")
+
+        def _subpart_sort_key(nid: str) -> tuple:
+            # order by earliest section contained in the subpart
+            key = min_section_key(nid)
+            d = G.nodes.get(nid, {})
+            # tie-breakers for stability
+            return (*key, d.get("code") or "", d.get("label") or "")
+
+        def _heading_sort_key(nid: str) -> tuple:
+            # CRITICAL: order headings by the earliest section they contain
+            key = min_section_key(nid)
+            d = G.nodes.get(nid, {})
+            return (*key, d.get("label") or "")
+
+        def _paragraph_sort_key(nid: str) -> tuple:
+            d = G.nodes.get(nid, {})
+            return _paragraph_key_from_pid(d.get("paragraph_id") or "")
+
+        # Indices we’ll populate
+        uuid_to_node: dict[str, dict] = {}
+        uuid_to_path: dict[str, list[str]] = {}
+        bottom_uuid_to_path: dict[str, list[str]] = {}
+
+        def _make_outline_node(nid: str) -> dict:
+            d = G.nodes.get(nid, {})
+            t = d.get("ntype")
+            out = {"type": t, "uuid": nid}
+            if t == "Document":
+                out["label"] = d.get("label");
+                out["title"] = d.get("title")
+            elif t == "Subpart":
+                out["label"] = d.get("label");
+                out["code"] = d.get("code");
+                out["title"] = d.get("title")
+            elif t == "Heading":
+                out["label"] = d.get("label")
+            elif t == "Section":
+                out["label"] = d.get("label");
+                out["number"] = d.get("number");
+                out["title"] = d.get("title")
+            elif t == "Guidance":
+                out["label"] = d.get("label");
+                out["number"] = d.get("number");
+                out["title"] = d.get("title")
+            elif t == "Paragraph":
+                out["paragraph_id"] = d.get("paragraph_id");
+                out["results"] = []
+            else:
+                out["label"] = d.get("label") or d.get("number") or d.get("paragraph_id")
+            return out
+
+        def _ordered_children(parent_id: str) -> list[str]:
+            kids = contains_children.get(parent_id, [])
+            buckets: dict[str, list[str]] = defaultdict(list)
+            for k in kids:
+                buckets[G.nodes.get(k, {}).get("ntype", "Other")].append(k)
+
+            ordered_ids: list[str] = []
+            for t in ("Subpart", "Heading", "Section", "Guidance", "Paragraph"):
+                if t not in buckets:
+                    continue
+                arr = buckets[t]
+                if t == "Subpart":
+                    arr.sort(key=_subpart_sort_key)
+                elif t == "Heading":
+                    arr.sort(key=_heading_sort_key)  # <-- key fix
+                elif t == "Section":
+                    arr.sort(key=_section_sort_key)
+                elif t == "Paragraph":
+                    arr.sort(key=_paragraph_sort_key)
+                else:
+                    arr.sort()
+                ordered_ids.extend(arr)
+
+            for t, arr in buckets.items():
+                if t in ("Subpart", "Heading", "Section", "Guidance", "Paragraph"):
+                    continue
+                ordered_ids.extend(sorted(arr))
+            return ordered_ids
+
+        def _walk_build(nid: str, path_prefix: list[str]) -> dict:
+            node = _make_outline_node(nid)
+            uuid_to_node[nid] = node
+            my_path = path_prefix + [nid]
+            uuid_to_path[nid] = my_path
+            if node.get("type") == "Paragraph":
+                bottom_uuid_to_path[nid] = my_path
+            for cid in _ordered_children(nid):
+                _add_child(node, _walk_build(cid, my_path))
+            return node
+
+        # Build forest or single root
+        if len(doc_nodes) > 1:
+            root = {"type": "Corpus", "children": []}
+            uuid_to_node["__corpus__"] = root
+            uuid_to_path["__corpus__"] = ["__corpus__"]
+            for doc_id in sorted(doc_nodes, key=lambda x: (self.G.nodes.get(x, {}).get("label") or "")):
+                _add_child(root, _walk_build(doc_id, ["__corpus__"]))
+        else:
+            root_id = doc_nodes[0]
+            root = _walk_build(root_id, [])
+
+        indices = {
+            "uuid_to_node": uuid_to_node,
+            "uuid_to_path": uuid_to_path,
+            "bottom_uuid_to_path": bottom_uuid_to_path,
+        }
+        return root, indices
+
+    def attach_result(self, outline_root: dict, indices: dict, item: dict) -> bool:
+        """
+        Append a streaming 'item' (from item_done) into the correct Paragraph node's `results` list.
+        Returns True if inserted, False if no matching paragraph uuid found.
+        Expected item shape (yours): { trace_uuid, bottom_uuid, bottom_clause, response, usage, run_id }
+        """
+        bottom_uuid = item.get("bottom_uuid")
+        if not bottom_uuid:
+            return False
+        uuid_to_node: dict = indices.get("uuid_to_node") or {}
+        para_node = uuid_to_node.get(bottom_uuid)
+        if not para_node or para_node.get("type") != "Paragraph":
+            return False
+        para_node.setdefault("results", []).append(item)
+        return True
+
+    # ---------------------------------------------------------------------
+    # Frontend Outline Builder - build from traces
+    # ---------------------------------------------------------------------
+
+    def _children_map(self) -> dict[str, list[str]]:
+        """parent -> [children] for CONTAINS edges."""
+        kids: dict[str, list[str]] = defaultdict(list)
+        for u, v, ed in self.G.edges(data=True):
+            if ed.get("relation") == "CONTAINS":
+                kids[u].append(v)
+        return kids
+
+    def _parent_map(self) -> dict[str, str]:
+        """child -> parent for CONTAINS edges."""
+        parent: dict[str, str] = {}
+        for u, v, ed in self.G.edges(data=True):
+            if ed.get("relation") == "CONTAINS":
+                parent[v] = u
+        return parent
+
+    def _child_sort_key(self, nid: str) -> tuple:
+        """Stable, human-friendly ordering for siblings (same spirit as your section/paragraph sort)."""
+        d = self.G.nodes.get(nid, {})
+        t = d.get("ntype")
+        if t == "Subpart":
+            return (0, d.get("code") or "", d.get("label") or "")
+        if t == "Heading":
+            return (1, d.get("label") or "")
+        if t == "Section":
+            return (2, d.get("number") or "", d.get("title") or "", d.get("label") or "")
+        if t == "Guidance":
+            return (3, d.get("number") or "", d.get("title") or "", d.get("label") or "")
+        if t == "Paragraph":
+            return (4, d.get("paragraph_id") or "")
+        # fallback
+        return (9, d.get("label") or d.get("number") or d.get("title") or "")
+
+    def _ordered_children_ids(self, children_map: dict[str, list[str]], parent_id: str) -> list[str]:
+        arr = list(children_map.get(parent_id, []))
+        arr.sort(key=self._child_sort_key)
+        return arr
+
+    def _labels_section_to_bottom(self, parent_map: dict[str, str], section_id: str, bottom_id: str) -> list[str]:
+        """
+        Build pretty labels from Section → ... → bottom Paragraph (inclusive).
+        e.g. ["CS 25.1309", "25.1309(b)", "25.1309(b)(1)", "25.1309(b)(1)(i)"]
+        """
+        cur = bottom_id
+        labels: list[str] = []
+        while cur:
+            d = self.G.nodes.get(cur, {})
+            t = d.get("ntype")
+            if t == "Paragraph":
+                labels.append(d.get("paragraph_id") or d.get("label") or cur)
+            elif t == "Section":
+                labels.append(d.get("number") or d.get("label") or d.get("title") or cur)
+                break
+            elif t == "Heading":
+                labels.append(d.get("label") or cur)
+            else:
+                labels.append(d.get("label") or d.get("number") or d.get("title") or cur)
+            cur = parent_map.get(cur)
+        labels.reverse()
+        return labels
+
+    def _rank_tuple_along_path(
+            self,
+            children_map: dict[str, list[str]],
+            parent_map: dict[str, str],
+            section_id: str,
+            bottom_id: str,
+    ) -> tuple:
+        """
+        Stable sort key for a bottom paragraph under its Section:
+        rank = (index at section level, index at heading, index at paragraph group, ...)
+        """
+        ranks: list[int] = []
+        cur = bottom_id
+        chain = [cur]
+        # climb to the section
+        while cur in parent_map:
+            cur = parent_map[cur]
+            chain.append(cur)
+            if cur == section_id:
+                break
+        chain.reverse()  # [section, ..., bottom]
+
+        for i in range(len(chain) - 1):
+            parent, child = chain[i], chain[i + 1]
+            ordered = self._ordered_children_ids(children_map, parent)
+            try:
+                idx = ordered.index(child)
+            except ValueError:
+                idx = 10 ** 6
+            ranks.append(idx)
+        return tuple(ranks)
+
+    def build_section_traces_for_frontend(self) -> tuple[dict, dict]:
+        """
+        Build UI-friendly trace rows per Section using explicit Trace nodes.
+
+        Returns:
+          section_traces: {
+            <section_uuid>: [
+              {
+                "trace_uuid": <str>,
+                "bottom_uuid": <str>,
+                "bottom_paragraph_id": <str | None>,
+                "path_labels": <list[str]>,   # e.g. ["CS 25.20", "25.20(b)", "25.20(b)(1)"]
+                "results": [],                # place to append streamed item results (optional)
+              },
+              ...
+            ],
+            ...
+          }
+
+          trace_lookup: {
+            <trace_uuid>: { "section_uuid": <str>, "index": <int>, "bottom_uuid": <str> },
+            ...
+          }
+        """
+        children_map = self._children_map()
+        parent_map = self._parent_map()
+
+        # 1) collect Trace nodes
+        trace_nodes = [(nid, d) for nid, d in self.G.nodes(data=True) if d.get("ntype") == "Trace"]
+
+        # 2) bucket rows under owning Section (unsorted first)
+        buckets: dict[str, list[dict]] = defaultdict(list)
+
+        for tid, td in trace_nodes:
+            bottom_uuid = td.get("bottom_uuid")
+            if not bottom_uuid or bottom_uuid not in self.G.nodes:
+                continue
+
+            # climb parent chain to the Section that owns this paragraph
+            cur = bottom_uuid
+            section_id: Optional[str] = None
+            while cur in parent_map:
+                cur = parent_map[cur]
+                if self.G.nodes[cur].get("ntype") == "Section":
+                    section_id = cur
+                    break
+            if not section_id:
+                continue  # skip traces not beneath a Section
+
+            labels = self._labels_section_to_bottom(parent_map, section_id, bottom_uuid)
+            rank = self._rank_tuple_along_path(children_map, parent_map, section_id, bottom_uuid)
+
+            buckets[section_id].append({
+                "trace_uuid": tid,
+                "bottom_uuid": bottom_uuid,
+                "bottom_paragraph_id": self.G.nodes[bottom_uuid].get("paragraph_id"),
+                "path_labels": labels,
+                "rank": rank,  # temp, used for sort below
+                "results": [],  # optional server-seed
+            })
+
+        # 3) sort rows by rank & build lookup
+        section_traces: dict[str, list[dict]] = {}
+        trace_lookup: dict[str, dict] = {}
+
+        for sid, rows in buckets.items():
+            rows.sort(key=lambda r: r["rank"])
+            cleaned: list[dict] = []
+            for i, r in enumerate(rows):
+                trace_lookup[r["trace_uuid"]] = {
+                    "section_uuid": sid,
+                    "index": i,
+                    "bottom_uuid": r["bottom_uuid"],
+                }
+                cleaned.append({
+                    "trace_uuid": r["trace_uuid"],
+                    "bottom_uuid": r["bottom_uuid"],
+                    "bottom_paragraph_id": r["bottom_paragraph_id"],
+                    "path_labels": r["path_labels"],
+                    "results": r["results"],
+                })
+            section_traces[sid] = cleaned
+
+        return section_traces, trace_lookup
+
+    def append_trace_result(
+            self,
+            section_traces: dict,
+            trace_lookup: dict,
+            item: dict,
+    ) -> dict:
+        """
+        Immutably append one streamed item (from item_done.item) to the correct trace row.
+
+        item is expected to include trace_uuid (preferred) or bottom_uuid (fallback).
+        Returns a NEW section_traces dict (safe for React state updates).
+        """
+        t_id: Optional[str] = item.get("trace_uuid")
+        btm: Optional[str] = item.get("bottom_uuid")
+
+        # 1) Resolve section & index
+        sid: Optional[str] = None
+        idx: Optional[int] = None
+
+        if t_id and t_id in trace_lookup:
+            sid = trace_lookup[t_id]["section_uuid"]
+            idx = trace_lookup[t_id]["index"]
+        elif btm:
+            # Fallback: scan to find by bottom_uuid
+            for sec, rows in section_traces.items():
+                for i, r in enumerate(rows):
+                    if r.get("bottom_uuid") == btm:
+                        sid, idx = sec, i
+                        break
+                if sid:
+                    break
+
+        if sid is None or idx is None:
+            return section_traces  # nothing to do
+
+        # 2) append immutably
+        rows = section_traces.get(sid, [])
+        if idx < 0 or idx >= len(rows):
+            return section_traces
+
+        row = rows[idx]
+        new_row = dict(row)
+        new_row["results"] = (row.get("results") or []) + [item]
+
+        new_rows = rows[:]
+        new_rows[idx] = new_row
+
+        new_section_traces = dict(section_traces)
+        new_section_traces[sid] = new_rows
+        return new_section_traces

@@ -1,3 +1,4 @@
+// src/components/console/bottom-console.tsx
 "use client";
 
 import { useMemo } from "react";

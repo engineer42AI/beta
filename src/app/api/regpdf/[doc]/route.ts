@@ -6,7 +6,7 @@ import path from "node:path";
 const DOC_PATHS: Record<string, string> = {
   // point to a PRIVATE location (outside /public)
   // update this path to where you keep the PDF on your server/container
-  cs25: process.env.CS25_PDF_PATH || "src/app/private/CS-25 Amendment 27 (new).pdf",
+  cs25: process.env.CS25_PDF_PATH || "src/app/data/CS-25 Amendment 27 (new).pdf",
 };
 
 export async function GET(req: NextRequest, { params }: { params: { doc: string } }) {

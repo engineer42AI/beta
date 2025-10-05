@@ -9,7 +9,7 @@ const NODE_FILES = [
   "NODES_regulation_JUL2025_paragraphs_V1.jsonl",
   "NODES_regulation_JUL2025_traces_V1.jsonl",
   "NODES_regulation_JUL2025_traceIntent_V1.jsonl",
-  "NODES_regulation_JUL2025_sectionIntent_V1.jsonl",
+  "NODES_sectionIntent_V2_oct2025.jsonl",
 ];
 
 const EDGE_FILES = [

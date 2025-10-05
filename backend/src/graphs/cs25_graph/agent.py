@@ -1,4 +1,4 @@
-# agent.py
+# backend/src/graphs/cs25_graph/agent.py
 import os, uuid, asyncio, time, random, json
 from typing import Dict, Any, List, Optional, Tuple, Callable, AsyncGenerator
 from pydantic import BaseModel, Field
@@ -13,10 +13,10 @@ class AgentInputs(BaseModel):
 class RelevanceResult(BaseModel):
     # You can change these fields any time. We won't hard-code them elsewhere.
     relevant: bool
-    rationale: Optional[str] = Field(description="BLUF style rationale in one sentence.")
+    rationale: Optional[str] = Field(description="Rationale in one plain-English sentence, BLUF style <20 words. Start with 'Yes;' or 'No;'.")
 
 class AsyncAgent:
-    def __init__(self, model: str = "gpt-4o-mini", api_key: Optional[str] = None):
+    def __init__(self, model, api_key: Optional[str] = None):
         self.model = model
         self.client = AsyncOpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
 
@@ -26,23 +26,52 @@ class AsyncAgent:
           { run_id: str, response: <dict>, usage: {input_tokens, output_tokens, total_tokens} }
         'response' mirrors your Pydantic schema (no hard-coded keys).
         """
-        system = (
-            "You are an aerospace CS-25 expert and systems engineer. "
-            "Decide if the provided CS-25 regulatory trace contains any useful information "
-            "to address the user query. Reply ONLY via the JSON schema."
-        )
-        user_content = f"""# User Query
+        system = ("""
+You are the world’s best CS-25 aircraft certification and systems engineer.
+
+Task:
+Decide if the provided CS-25 regulatory content is relevant to the USER QUERY.  
+Ask yourself: Would a certifying engineer reasonably cite or apply this regulation when analyzing that USER QUERY scenario?  
+
+Inputs:
+1. USER QUERY
+2. TRACE: structure of the regulation from bottom paragraph up, with classifications showing each paragraph’s function.
+3. INTENT: focused explanation of the specific intent of this trace.
+
+Guidance:
+- TRACE shows structure and roles, not raw text.
+- Trace Intent is your main guide for this decision.
+- Classifications tell you the function:
+  • normative_requirement = binding rule  
+  • condition_clause = dependent on parent normative  
+  • exception_clause = carve-out or limiter  
+  • scope_setter = applicability boundaries  
+  • guidance = advisory or explanatory  
+  • definition = term meaning  
+  • reference_only = pointer only  
+  • reserved = no content
+
+Important:
+- NEVER mention or expose the internal classification labels (e.g., normative_requirement, scope_setter, condition_clause, etc.) in your output.
+- Use them only to guide your reasoning about relevance.
+""")
+        user_content = f"""
+<USER_QUERY>
 {query}
+</USER_QUERY>
 
-# Trace
+<TRACE>
 {inputs.trace_block or ""}
+</TRACE>
 
-# Intents
+<INTENTS>
 {inputs.intents_block or ""}
-
-# Citations
-{inputs.cites_block or ""}
+</INTENTS>
 """
+        #<CITATIONS>
+        #{inputs.cites_block or ""}
+        #</CITATIONS>
+        print(user_content)
         resp = await self.client.responses.parse(
             model=self.model,
             input=[{"role": "system", "content": system},
@@ -174,8 +203,9 @@ async def _stream_batch_parallel(
         cb = ops.format_citations_block(bundle["trace"], bundle["cites"], include_uuids=False)
         ib = ops.format_intents_block(
             bundle["trace"], bundle["intents"],
-            fields=["intent", "section_intent"],  # customize; we don't inspect these later
-            include_uuids=False
+            fields=["intent", "events", "summary"],  # what keys to include in the response?
+            include_uuids=False,
+            include_levels=["section", "trace"] # what intents to return - only for trace, or trace and section, or only for section?
         )
         payload = AgentInputs(trace_block=tb, cites_block=cb, intents_block=ib)
 
@@ -241,15 +271,23 @@ async def stream_all_traces(
     *,
     query: str,
     model: str = "gpt-4o-mini",
-    batch_size: int = 200,   # also the parallelism
+    batch_size: int = 200,
     limit: Optional[int] = None,
     pricing_per_million: Tuple[float, float] = (0.15, 0.60),
+    selected_trace_ids: Optional[List[str]] = None,   # <-- NEW
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Yields events for the entire run:
       run_start, batch_header, (batch_*...), run_end
     """
+    # original list in graph order
     all_traces = iter_trace_nodes(G)
+
+    # NEW: filter if a selection is provided (preserve original order)
+    if selected_trace_ids:
+        sel = set(selected_trace_ids)
+        all_traces = [t for t in all_traces if t.get("trace_uuid") in sel]
+
     if limit:
         all_traces = all_traces[:limit]
 
@@ -262,7 +300,7 @@ async def stream_all_traces(
         "ts": time.time(),
         "model": model,
         "query": query,
-        "total_traces": total_traces,
+        "total_traces": total_traces,   # <-- now reflects selection
         "batch_size": batch_size,
         "num_batches": num_batches,
         "pricing_per_million": {"input_usd": pricing_per_million[0], "output_usd": pricing_per_million[1]},
@@ -316,3 +354,81 @@ async def collect_report_from_stream(stream: AsyncGenerator[Dict[str, Any], None
         elif evt.get("type") == "run_end":
             summary = evt.get("summary", {})
     return {"summary": summary, "results": results}
+
+
+# --- add to cs25_graph/agent.py ---
+
+from typing import AsyncGenerator, Dict, Any, Optional, Tuple
+from .utils import ManifestGraph, GraphOps
+
+# Cache the loaded graph so we don't rebuild on every request
+_RUNTIME_CACHE = None
+
+def _get_runtime():
+    global _RUNTIME_CACHE
+    if _RUNTIME_CACHE is None:
+        mg = ManifestGraph()   # defaults to folder of utils.py
+        mg.load()              # loads manifest + nodes/edges and builds mg.G
+        ops = GraphOps(mg.G)
+        _RUNTIME_CACHE = (mg, ops)
+    return _RUNTIME_CACHE
+
+async def stream(
+    *,
+    query: str,
+    model: str = "gpt-5-nano",
+    batch_size: int = 5,
+    limit: Optional[int] = None,
+    pricing_per_million: Tuple[float, float] = (0.05, 0.40),
+    selected_trace_ids: Optional[List[str]] = None,   # <-- NEW
+) -> AsyncGenerator[Dict[str, Any], None]:
+    mg, ops = _get_runtime()
+    async for evt in stream_all_traces(
+        mg.G,
+        ops,
+        query=query,
+        model=model,
+        batch_size=batch_size,
+        limit=limit,
+        pricing_per_million=pricing_per_million,
+        selected_trace_ids=selected_trace_ids,         # <-- pass through
+    ):
+        yield evt
+
+async def run_once(
+    *,
+    query: str,
+    model: str = "gpt-5-nano",
+    batch_size: int = 5,
+    limit: Optional[int] = None,
+    pricing_per_million: Tuple[float, float] = (0.05, 0.40),
+    selected_trace_ids: Optional[List[str]] = None,    # <-- NEW
+) -> Dict[str, Any]:
+    s = stream(
+        query=query,
+        model=model,
+        batch_size=batch_size,
+        limit=limit,
+        pricing_per_million=pricing_per_million,
+        selected_trace_ids=selected_trace_ids,          # <-- pass through
+    )
+    return await collect_report_from_stream(s)
+
+# --- outline helpers (use your GraphOps methods) ---
+from .utils import ManifestGraph, GraphOps  # already imported above
+
+# reuse the same cached runtime you already added
+# _RUNTIME_CACHE, _get_runtime() exist
+
+async def get_outline() -> dict:
+    mg, ops = _get_runtime()
+    outline, indices = ops.build_outline_for_frontend()
+    section_traces, trace_lookup = ops.build_section_traces_for_frontend()
+
+    return {
+        "outline": outline,
+        "indices": indices,
+        "section_traces": section_traces,
+        # { <section_uuid>: [ {trace_uuid, bottom_uuid, bottom_paragraph_id, path_labels, results: []}, ... ] }
+        "trace_lookup": trace_lookup,  # { <trace_uuid>: { section_uuid, index, bottom_uuid } }
+    }

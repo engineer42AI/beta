@@ -1,4 +1,4 @@
-// components/console/ConsolePanels.tsx
+// src/components/console/ConsolePanels.tsx
 "use client";
 
 import { useEffect, useState } from "react";

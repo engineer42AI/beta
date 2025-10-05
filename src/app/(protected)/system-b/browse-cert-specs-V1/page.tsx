@@ -62,7 +62,7 @@ function buildGraphFromBundle(bundle: Bundle) {
   const G = new MultiDiGraph();
   const getNodeId = (n: any) =>
     n?.uuid_document || n?.uuid_subpart || n?.uuid_heading || n?.uuid_section ||
-    n?.uuid_guidance || n?.uuid_paragraph || n?.uuid_trace || n?.uuid_intent;
+    n?.uuid_guidance || n?.uuid_paragraph || n?.uuid_trace || n?.uuid_intent || n?.uuid; // <- added n?.uuid
 
   for (const arr of Object.values(bundle.nodes ?? {})) {
     (arr || []).forEach(n => { const id = getNodeId(n); if (id) G.addNode(id, n); });
@@ -96,15 +96,24 @@ class GraphOps {
     const n = this.G.node(uuid_p);
     return (n?.ntype === "Paragraph") ? (n?.paragraph_id ?? null) : null;
   }
+
+  /** UPDATED: returns { summary, intent, events } for the section's HAS_INTENT node */
   getIntentDetailsForSection(uuid_section: string) {
     for (const e of this.G.outEdges(uuid_section)) {
       if (e.relation === "HAS_INTENT") {
         const n = this.G.node(e.target);
-        if (n?.ntype === "Intent") return { section_intent: n.section_intent, ai_notes: n.ai_notes };
+        if (n?.ntype === "Intent") {
+          return {
+            summary: n.summary,
+            intent: n.intent,
+            events: n.events,
+          };
+        }
       }
     }
     return null;
   }
+
   getIntentDetailsForBottomParagraph(uuid_bottom: string) {
     const inEs = this.G.inEdges(uuid_bottom).filter(e => e.relation === "HAS_ANCHOR");
     if (!inEs.length) return null;
@@ -116,6 +125,7 @@ class GraphOps {
     if (n?.ntype !== "Intent") return null;
     return { intent: n.intent, events: n.events, expert_notes: n.expert_notes };
   }
+
   findParagraphTracesInSection(uuid_section: string) {
     const traces: Record<string, string[]> = {};
     let counter = 1;
@@ -244,7 +254,9 @@ export default function RegulatoryExplorer() {
   const [sectionInput, setSectionInput] = useState("");
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [sectionLabel, setSectionLabel] = useState<string | null>(null);
-  const [sectionIntent, setSectionIntent] = useState<{ section_intent?: string; ai_notes?: string[] | string } | null>(null);
+
+  /** UPDATED: reflect new keys from Intent node */
+  const [sectionIntent, setSectionIntent] = useState<{ summary?: string; intent?: string; events?: string[] } | null>(null);
 
   const [traces, setTraces] = useState<Record<string, string[]> | null>(null);
   const [selectedTraceKey, setSelectedTraceKey] = useState<string>("");
@@ -417,38 +429,46 @@ export default function RegulatoryExplorer() {
               // Side-by-side: left = cards, right = PDF
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
                 <div className="xl:col-span-7 space-y-4">
-                  {/* SECTION — OVERALL INTENT */}
+                  {/* SECTION — OVERVIEW */}
                   <div className="bg-card border border-border rounded-[var(--radius)] shadow-sm">
                     <div className="p-4 border-b border-border">
                       <div className="text-xs uppercase tracking-wider text-muted-foreground">Section</div>
                       <div className="text-lg font-semibold">{sectionLabel || sectionInput}</div>
                     </div>
+
+                    {/* Summary */}
                     <div className="p-4">
-                      <div className="text-sm font-medium mb-1">Overall intent</div>
+                      <div className="text-sm font-medium mb-1">Summary</div>
                       <div className="text-sm">
-                        {sectionIntent?.section_intent ? (
-                          sectionIntent.section_intent
+                        {sectionIntent?.summary ? (
+                          sectionIntent.summary
                         ) : (
-                          <Empty>No section intent captured.</Empty>
+                          <Empty>No summary captured.</Empty>
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  {/* SECTION — RATIONALE */}
-                  <div className="bg-card border border-border rounded-[var(--radius)] shadow-sm">
-                    <div className="p-4">
-                      <div className="text-sm font-medium mb-2">Rationale from real events</div>
+                    {/* Intent */}
+                    <div className="px-4 pb-4">
+                      <div className="text-sm font-medium mb-1">Intent</div>
+                      <div className="text-sm">
+                        {sectionIntent?.intent ? (
+                          sectionIntent.intent
+                        ) : (
+                          <Empty>No intent captured.</Empty>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Events */}
+                    <div className="px-4 pb-4">
+                      <div className="text-sm font-medium mb-2">Events</div>
                       <ul className="list-disc ml-5 text-sm space-y-1">
-                        {(Array.isArray(sectionIntent?.ai_notes)
-                          ? sectionIntent?.ai_notes
-                          : sectionIntent?.ai_notes
-                          ? [sectionIntent?.ai_notes]
-                          : []
-                        ).map((n, i) => (
-                          <li key={i}>{n}</li>
-                        ))}
-                        {!sectionIntent?.ai_notes && <li className="italic text-muted-foreground">(none)</li>}
+                        {Array.isArray(sectionIntent?.events) && sectionIntent!.events!.length ? (
+                          sectionIntent!.events!.map((e, i) => <li key={i}>{e}</li>)
+                        ) : (
+                          <li className="italic text-muted-foreground">(none)</li>
+                        )}
                       </ul>
                     </div>
                   </div>
@@ -456,48 +476,57 @@ export default function RegulatoryExplorer() {
 
                 {/* Right column: PDF viewer */}
                 <div className="xl:col-span-5">
-                      <div className="bg-card border border-border rounded-[var(--radius)] shadow-sm overflow-hidden">
-                        <PdfViewer
-                          key={sectionId || "pdf"}        // ✅ remount only when section changes (or remove the key entirely)
-                          fileUrl="/api/regpdf/cs25"
-                          searchTerm={effectiveSearch}
-                        />
-                      </div>
+                  <div className="bg-card border border-border rounded-[var(--radius)] shadow-sm overflow-hidden">
+                    <PdfViewer
+                      key={sectionId || "pdf"}
+                      fileUrl="/api/regpdf/cs25"
+                      searchTerm={effectiveSearch}
+                    />
+                  </div>
                 </div>
               </div>
             ) : (
-              // Single column (original)
+              // Single column
               <>
                 <div className="bg-card border border-border rounded-[var(--radius)] shadow-sm">
                   <div className="p-4 border-b border-border">
                     <div className="text-xs uppercase tracking-wider text-muted-foreground">Section</div>
                     <div className="text-lg font-semibold">{sectionLabel || sectionInput}</div>
                   </div>
+
+                  {/* Summary */}
                   <div className="p-4">
-                    <div className="text-sm font-medium mb-1">Overall intent</div>
+                    <div className="text-sm font-medium mb-1">Summary</div>
                     <div className="text-sm">
-                      {sectionIntent?.section_intent ? (
-                        sectionIntent.section_intent
+                      {sectionIntent?.summary ? (
+                        sectionIntent.summary
                       ) : (
-                        <Empty>No section intent captured.</Empty>
+                        <Empty>No summary captured.</Empty>
                       )}
                     </div>
                   </div>
-                </div>
 
-                <div className="bg-card border border-border rounded-[var(--radius)] shadow-sm">
-                  <div className="p-4">
-                    <div className="text-sm font-medium mb-2">Rationale from real events</div>
+                  {/* Intent */}
+                  <div className="px-4 pb-4">
+                    <div className="text-sm font-medium mb-1">Intent</div>
+                    <div className="text-sm">
+                      {sectionIntent?.intent ? (
+                        sectionIntent.intent
+                      ) : (
+                        <Empty>No intent captured.</Empty>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Events */}
+                  <div className="px-4 pb-4">
+                    <div className="text-sm font-medium mb-2">Events</div>
                     <ul className="list-disc ml-5 text-sm space-y-1">
-                      {(Array.isArray(sectionIntent?.ai_notes)
-                        ? sectionIntent?.ai_notes
-                        : sectionIntent?.ai_notes
-                        ? [sectionIntent?.ai_notes]
-                        : []
-                      ).map((n, i) => (
-                        <li key={i}>{n}</li>
-                      ))}
-                      {!sectionIntent?.ai_notes && <li className="italic text-muted-foreground">(none)</li>}
+                      {Array.isArray(sectionIntent?.events) && sectionIntent!.events!.length ? (
+                        sectionIntent!.events!.map((e, i) => <li key={i}>{e}</li>)
+                      ) : (
+                        <li className="italic text-muted-foreground">(none)</li>
+                      )}
                     </ul>
                   </div>
                 </div>
@@ -505,7 +534,7 @@ export default function RegulatoryExplorer() {
             )
           )}
 
-          {/* --- TRACES + DETAILS (unchanged) --- */}
+          {/* --- TRACES + DETAILS (unchanged UI; works with new keys) --- */}
           {sectionId && (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
               {/* LEFT: trace list */}
@@ -599,7 +628,7 @@ export default function RegulatoryExplorer() {
                         </div>
 
                         <div className="rounded-md border border-border bg-background p-3">
-                          <div className="font-medium mb-1">Rationale from real events</div>
+                          <div className="font-medium mb-1">Events</div>
                           <ul className="list-disc ml-5 text-sm space-y-1">
                             {Array.isArray(traceBottomIntent?.events) && traceBottomIntent!.events!.length ? (
                               traceBottomIntent!.events!.map((e, i) => <li key={i}>{e}</li>)

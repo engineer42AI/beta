@@ -587,3 +587,95 @@ a { color: inherit; text-decoration: none; }
     background: color-mix(in oklab, hsl(var(--ring)) 35%, transparent);
   }
 }
+
+/* path chips in the table (quieter, theme-safe) */
+.badge-pill.chip{
+  padding: 2px 8px;
+  border-radius: 9999px;
+  /* derive from bg/fg so it reads in light & dark */
+  background: color-mix(in oklab, hsl(var(--background)) 100%, hsl(var(--foreground)) 6%);
+  border-color: color-mix(in oklab, hsl(var(--border)) 70%, transparent);
+  text-transform: none !important;
+  font-size: 12px;
+  line-height: 1.1;
+}
+.badge-pill.chip.is-bottom{
+  background: color-mix(in oklab, hsl(var(--background)) 100%, hsl(var(--foreground)) 10%);
+  border-color: color-mix(in oklab, hsl(var(--border)) 75%, transparent);
+  font-weight: 600;
+}
+/* chips used in the Path column */
+.chip { text-transform: none !important; }
+.chip::before { display: none !important; }
+
+/* ── Trace table ─────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────
+   Light-mode tuning + remove hover outline
+   Place AFTER your existing table rules
+   ───────────────────────────────────────────── */
+
+/* LIGHT THEME ONLY */
+html:not(.dark) {
+  /* gentler stripes & hover in light */
+  --tt-zebra-odd: 3%;
+  --tt-zebra-even: 1%;
+  --tt-hover: 6%;
+
+  /* use border tone for separators instead of foreground contrast */
+  --tt-sep: color-mix(in oklab, hsl(var(--border)) 70%, transparent);
+
+  /* header: whisper-light gradient */
+  --tt-head-grad: linear-gradient(
+    180deg,
+    color-mix(in oklab, hsl(var(--background)) 100%, hsl(var(--foreground)) 3%) 0%,
+    color-mix(in oklab, hsl(var(--background)) 100%, hsl(var(--foreground)) 2%) 100%
+  );
+}
+
+/* Remove the dark-looking 1px inset border on hover/focus */
+.trace-table > div > .trace-row:hover,
+.trace-table > div > .trace-row:focus-within {
+  /* keep the subtle hover bg only */
+  box-shadow: none !important;
+}
+
+/* Lighter separators between body rows */
+.trace-table > div > .trace-row + .trace-row {
+  border-top: 1px solid color-mix(in oklab, hsl(var(--border)) 65%, transparent) !important;
+}
+
+/* Optional: make the outer zebra list even calmer in light mode */
+html:not(.dark) .zebra-list > *:nth-child(odd)  { background: var(--tt-zebra-even-color); }
+html:not(.dark) .zebra-list > *:nth-child(even) { background: transparent; }
+html:not(.dark) .zebra-list > *:hover { background: var(--tt-hover-color); }
+
+/* ─────────────────────────────────────────────
+   Outline separators (Subpart/Heading/Section only)
+   Place AFTER previous rules
+   ───────────────────────────────────────────── */
+
+/* tone for the outline dividers */
+.zebra-list {
+  --ol-sep: color-mix(in oklab, hsl(var(--border)) 70%, transparent);
+}
+.dark .zebra-list {
+  --ol-sep: color-mix(in oklab, hsl(var(--border)) 45%, transparent);
+}
+
+/* kill the old zebra backgrounds on outline items */
+.zebra-list > * {
+  background: transparent !important;
+}
+
+/* draw a light line only between siblings (does not touch inner tables) */
+.zebra-list > * + * {
+  border-top: 1px solid var(--ol-sep) !important;
+}
+
+/* optional: very gentle hover just on the outline row */
+.zebra-list > *:hover {
+  background: color-mix(in oklab, hsl(var(--background)) 100%, hsl(var(--foreground)) 4%);
+}
+html.dark .zebra-list > *:hover {
+  background: color-mix(in oklab, hsl(var(--background)) 100%, hsl(var(--foreground)) 8%);
+}

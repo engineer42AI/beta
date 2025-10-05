@@ -2,12 +2,12 @@ import os
 import logging
 import traceback
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from .inline_agent import InlineWorkflowAgent, InlineInputs
+from backend.src.app.routers import InlineWorkflowAgent, InlineInputs
 
 # -------- Logging --------
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

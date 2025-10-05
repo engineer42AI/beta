@@ -1,4 +1,4 @@
-/** src/app/(protected)/system-b/browse-cert-specs-V2/page.tsx */
+/** src/app/(protected)/system-b/browse-cert-specs-V3/page.tsx */
 
 'use client';
 
@@ -7,25 +7,20 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/api';
 
-/* ---------------- Types (minimal) ---------------- */
+/* ---------------- Types ---------------- */
 type OutlineNode = {
-  type: string;
+  type: 'Subpart' | 'Heading' | 'Section';
   uuid: string;
   label?: string;
   number?: string;
   title?: string;
   paragraph_id?: string;
-  results?: any[];
   children?: OutlineNode[];
-};
-
-type Indices = {
-  uuid_to_node: Record<string, OutlineNode>;
-  uuid_to_path: Record<string, string[]>;
-  bottom_uuid_to_path: Record<string, string[]>;
 };
 
 type AnyEvent = {
@@ -36,86 +31,260 @@ type AnyEvent = {
 type ItemDone = {
   type: 'item_done';
   item: {
+    trace_uuid: string;
     bottom_uuid?: string;
     bottom_clause?: string;
     response?: { relevant?: boolean; rationale?: string };
     usage?: { total_cost?: number };
-    // ... other fields
   };
 };
 
-/* -------------- Helpers: stats -------------- */
-
-type NodeStats = {
-  total: number;        // number of streamed items under this node
-  relevant: number;     // response.relevant === true
-  notRelevant: number;  // response.relevant === false
+type TraceRow = {
+  trace_uuid: string;
+  bottom_uuid: string;
+  bottom_paragraph_id?: string;
+  path_labels: string[];   // e.g. ["CS 25.20", "25.20(a)", "25.20(a)(1)"]
+  results?: any[];         // streamed items we've appended
 };
 
-type StatsById = Record<string, NodeStats>;
-
-/** Count results for a single Paragraph node. */
-function statsForParagraph(node: OutlineNode): NodeStats {
-  const items = node.results ?? [];
-  let total = 0, relevant = 0, notRelevant = 0;
-  for (const it of items) {
-    total += 1;
-    if (it?.response?.relevant === true) relevant += 1;
-    else if (it?.response?.relevant === false) notRelevant += 1;
+// reset helpers
+function stripResults(m: Record<string, TraceRow[]>): Record<string, TraceRow[]> {
+  const out: Record<string, TraceRow[]> = {};
+  for (const [sid, rows] of Object.entries(m)) {
+    out[sid] = rows.map(r => {
+      // drop any streamed results, keep the rest
+      const { results, ...rest } = r as any;
+      return { ...rest };
+    }) as TraceRow[];
   }
-  return { total, relevant, notRelevant };
+  return out;
 }
 
-/** Recursively compute stats for the whole outline and return a map uuid -> stats. */
-function computeStats(outline: OutlineNode | null): StatsById {
-  const byId: StatsById = {};
-  if (!outline) return byId;
+// --- TriStateCheckbox: shadcn/ui (Radix) powered ---
+function TriStateCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  className = "",
+  title,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: (checked: boolean) => void;
+  className?: string;
+  title?: string;
+}) {
+  // Radix Checkbox accepts checked: boolean | "indeterminate"
+  // and onCheckedChange: (boolean | "indeterminate") => void
+  const visualState: boolean | "indeterminate" = indeterminate ? "indeterminate" : checked;
 
-  function walk(node: OutlineNode): NodeStats {
-    if (node.type === 'Paragraph') {
-      const s = statsForParagraph(node);
-      byId[node.uuid] = s;
-      return s;
-    }
-    let total = 0, relevant = 0, notRelevant = 0;
-    for (const c of node.children ?? []) {
-      const s = walk(c);
-      total += s.total;
-      relevant += s.relevant;
-      notRelevant += s.notRelevant;
-    }
-    const s = { total, relevant, notRelevant };
-    byId[node.uuid] = s;
-    return s;
-  }
-
-  walk(outline);
-  return byId;
-}
-
-/** Tiny badge group to render counts. */
-function Counts({ s }: { s?: NodeStats }) {
-  if (!s) return null;
   return (
-    <span className="ml-2 inline-flex gap-1 items-center">
-      <Badge variant="outline" className="px-1.5 py-0 text-[10px]">{s.total}</Badge>
-      <Badge className="px-1.5 py-0 text-[10px] bg-green-600 text-white hover:bg-green-600">
-        {s.relevant}
-      </Badge>
-      <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
-        {s.notRelevant}
-      </Badge>
-    </span>
+    <Checkbox
+      title={title}
+      checked={visualState}
+      onCheckedChange={(v) => {
+        // Treat "indeterminate" like a click-to-check (select all)
+        onChange(v === true);
+      }}
+      className={[
+        "h-4 w-4 shrink-0",
+        // optional: tighten border to match your UI
+        "border-muted-foreground/50",
+        className,
+      ].join(" ")}
+    />
   );
 }
 
-/* -------------- Helpers: NDJSON streamer -------------- */
-async function streamNdjson(url: string, payload: unknown, signal: AbortSignal, onEvent: (evt: AnyEvent) => void) {
-  const res = await fetch(url, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal,
-  });
-  if (!res.ok || !res.body) throw new Error(`Stream failed: ${res.status} ${res.statusText}`);
+/* ---------------- Stat helpers (from trace rows) ---------------- */
 
+type NodeStats = { total: number; relevant: number; notRelevant: number };
+const zeroStats = (): NodeStats => ({ total: 0, relevant: 0, notRelevant: 0 });
+
+function StatPills({ s }: { s?: NodeStats }) {
+  if (!s) return null;
+  return (
+    <div className="ml-auto flex items-center gap-1 w-[96px] justify-end" aria-label="section stats">
+      <Badge variant="outline" className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center">
+        <span className="tabular-nums">{s.total}</span>
+      </Badge>
+      <Badge className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center bg-emerald-600 text-white">
+        <span className="tabular-nums">{s.relevant}</span>
+      </Badge>
+      <Badge variant="destructive" className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center">
+        <span className="tabular-nums">{s.notRelevant}</span>
+      </Badge>
+    </div>
+  );
+}
+
+function statsFromTraceRows(rows: TraceRow[] | undefined): NodeStats {
+  const s = zeroStats();
+  if (!rows) return s;
+  for (const r of rows) {
+    const items = r.results ?? [];
+    for (const it of items) {
+      s.total += 1;
+      if (it?.response?.relevant === true) s.relevant += 1;
+      else if (it?.response?.relevant === false) s.notRelevant += 1;
+    }
+  }
+  return s;
+}
+
+function addStats(a: NodeStats, b: NodeStats): NodeStats {
+  return { total: a.total + b.total, relevant: a.relevant + b.relevant, notRelevant: a.notRelevant + b.notRelevant };
+}
+
+/* ---------------- tiny log model + formatter ---------------- */
+
+type StreamLine = { ts?: number; text: string };
+
+function tstamp(ts?: number) {
+  if (!ts) return '';
+  const d = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
+  return d.toTimeString().slice(0, 8);
+}
+
+function eventToLines(evt: AnyEvent): StreamLine[] {
+  const k = evt.type;
+  if (k === 'item_done') return [];
+  if (k === 'run_start') {
+    const q = (evt.query || '').toString().replace(/\s+/g, ' ').trim();
+    return [{ ts: evt.ts, text: `▶ run_start model=${evt.model} traces=${evt.total_traces} batch_size=${evt.batch_size}  query="${q}"` }];
+  }
+  if (k === 'batch_header') return [{ ts: evt.ts, text: `• batch_header ${evt.index}/${evt.of} size=${evt.size}` }];
+  if (k === 'batch_start')  return [{ ts: evt.ts, text: `• batch_start size=${evt.size}` }];
+  if (k === 'batch_progress') return [{
+    ts: evt.ts,
+    text: `✓ batch_progress ${evt.done}/${evt.total} tokens_in=${evt.tokens_in ?? '-'} tokens_out=${evt.tokens_out ?? '-'} cost=${(evt.batch_cost ?? 0).toFixed(6)} elapsed=${(evt.elapsed_s ?? 0).toFixed(2)}s`
+  }];
+  if (k === 'batch_end') return [{ ts: evt.ts, text: `• batch_end size=${evt.size} tokens_in=${evt.tokens_in ?? '-'} tokens_out=${evt.tokens_out ?? '-'} cost=${(evt.batch_cost ?? 0).toFixed(6)} elapsed=${(evt.elapsed_s ?? 0).toFixed(2)}s` }];
+  if (k === 'run_end') {
+    const s = evt.summary || {};
+    return [{ ts: evt.ts, text: `■ run_end model=${s.model} traces=${s.total_traces} tokens_in=${s.tokens_in ?? '-'} tokens_out=${s.tokens_out ?? '-'} est_cost=${(s.estimated_cost ?? 0).toFixed(6)}` }];
+  }
+  if (k === 'error') return [{ ts: Date.now(), text: `⚠ error ${evt.error ?? ''}` }];
+  return [{ ts: evt.ts, text: JSON.stringify(evt) }];
+}
+
+function isAbortError(err: unknown) {
+  return !!err && typeof err === "object" && (err as any).name === "AbortError";
+}
+
+function StreamConsole({ lines }: { lines: StreamLine[] }) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  useEffect(() => {
+    if (!autoScroll) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [lines, autoScroll]);
+
+  return (
+    <div className="rounded-lg border">
+      <div className="flex items-center justify-between px-3 py-2 text-xs bg-accent/60 text-accent-foreground">
+        <span className="font-medium">Stream</span>
+        <div className="flex items-center gap-3">
+          <span className="opacity-80">{lines.length} lines</span>
+          <label className="flex items-center gap-1 cursor-pointer select-none">
+            <input type="checkbox" className="accent-current" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
+            <span>Auto-scroll</span>
+          </label>
+        </div>
+      </div>
+
+      <div ref={wrapRef} className="max-h-[260px] overflow-auto bg-background" style={{ scrollbarGutter: 'stable' }}>
+        <table className="w-full text-xs font-mono">
+          <tbody>
+            {lines.map((ln, i) => (
+              <tr key={`${i}-${ln.ts ?? ''}`} className={i % 2 ? 'bg-accent/20' : ''}>
+                <td className="px-2 py-[3px] text-right align-top w-[48px] text-muted-foreground tabular-nums">{i + 1}</td>
+                <td className="px-2 py-[3px] align-top w-[70px] text-muted-foreground tabular-nums">{tstamp(ln.ts)}</td>
+                <td className="px-2 py-[3px] align-top whitespace-pre-wrap">{ln.text}</td>
+              </tr>
+            ))}
+            {lines.length === 0 && (
+              <tr>
+                <td className="px-2 py-2 text-muted-foreground" colSpan={3}>(no events yet)</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function StatusInline({ running, total, done, cost }: { running: boolean; total: number; done: number; cost: number; }) {
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return (
+    <div className="flex items-center gap-3 rounded-lg border bg-accent/20 px-3 py-2">
+      <div className="w-44">
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
+          <span>{running ? "Processing…" : "Idle"}</span>
+          <span className="tabular-nums">{pct}%</span>
+        </div>
+        <Progress value={pct} className="h-2" />
+        <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">{done}/{total} traces</div>
+      </div>
+      <div className="ml-1 flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">Cost</span>
+        <span className="font-mono tabular-nums px-2 py-[2px] rounded border bg-background">{cost.toFixed(6)}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Selection helpers (module-scope, pure) ---------------- */
+
+// flatten descendant section UUIDs
+function collectSectionIds(node: OutlineNode): string[] {
+  const out: string[] = [];
+  const stack: OutlineNode[] = [node];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur.type === 'Section') out.push(cur.uuid);
+    (cur.children ?? []).forEach((c) => stack.push(c));
+  }
+  return out;
+}
+
+// from a list of section UUIDs, gather *trace* UUIDs using the server-provided rows
+function collectTraceIdsForSections(sectionIds: string[], sectionTraces: Record<string, TraceRow[]>): string[] {
+  const ids: string[] = [];
+  for (const sid of sectionIds) {
+    const rows = sectionTraces[sid] ?? [];
+    for (const r of rows) ids.push(r.trace_uuid);
+  }
+  return ids;
+}
+
+function selectionStateForNode(
+  node: OutlineNode,
+  sectionTraces: Record<string, TraceRow[]>,
+  selected: Set<string>
+) {
+  const sectionIds = collectSectionIds(node);
+  const traceIds = collectTraceIdsForSections(sectionIds, sectionTraces);
+  if (traceIds.length === 0) return { total: 0, checked: false, indeterminate: false, ids: traceIds };
+  let selectedCount = 0;
+  for (const id of traceIds) if (selected.has(id)) selectedCount++;
+  const checked = selectedCount === traceIds.length;
+  const indeterminate = selectedCount > 0 && selectedCount < traceIds.length;
+  return { total: traceIds.length, checked, indeterminate, ids: traceIds };
+}
+
+/* ---------------- NDJSON streamer ---------------- */
+async function streamNdjson(
+  url: string,
+  payload: unknown,
+  signal: AbortSignal,
+  onEvent: (evt: AnyEvent) => void
+) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal });
+  if (!res.ok || !res.body) throw new Error(`Stream failed: ${res.status} ${res.statusText}`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
@@ -133,209 +302,476 @@ async function streamNdjson(url: string, payload: unknown, signal: AbortSignal, 
   }
 }
 
-/* -------------- Immutable update: append a result into the outline -------------- */
-/**
- * Given an outline tree, append `item` into the `results` array of the Paragraph node
- * whose uuid === item.bottom_uuid. Returns a new outline (immutably).
- */
-function appendResult(outline: OutlineNode | null, bottom_uuid: string, item: any): OutlineNode | null {
-  if (!outline) return outline;
-  // DFS copy-on-write
-  function visit(node: OutlineNode): OutlineNode {
-    let changed = false;
-    let children = node.children;
+/* ---------------- Misc UI helpers ---------------- */
 
-    if (node.uuid === bottom_uuid && node.type === 'Paragraph') {
-      const results = (node.results ?? []).concat(item);
-      return { ...node, results };
-    }
-
-    if (children && children.length) {
-      const newChildren = [];
-      for (const c of children) {
-        const next = visit(c);
-        changed = changed || next !== c;
-        newChildren.push(next);
-      }
-      if (changed) return { ...node, children: newChildren };
-    }
-    return node;
-  }
-  return visit(outline);
-}
-
-/* -------------- Flatten an outline into table rows for a nicer view -------------- */
-type Row = {
-  uuid: string;
-  kind: string;
-  pathLabel: string; // e.g. "Subpart B › GENERAL › CS 25.20 Scope"
-  paragraph_id?: string;
-  resultsCount?: number;
-  latestRationale?: string;
-  latestRelevant?: boolean | undefined;
-  latestCost?: number | undefined;
-};
-
-function rowsFromOutline(outline: OutlineNode | null): Row[] {
-  const out: Row[] = [];
-  if (!outline) return out;
-
-  function walk(node: OutlineNode, trail: string[]) {
-    const labelParts = [
-      node.number ? node.number : null,
-      node.title ? node.title : node.label ? node.label : null,
-    ].filter(Boolean) as string[];
-    const here = labelParts.join(' ');
-    const pathLabel = [...trail, here].filter(Boolean).join(' › ');
-
-    if (node.type === 'Paragraph') {
-      const results = node.results ?? [];
-      const latest = results.length ? results[results.length - 1] : undefined;
-      out.push({
-        uuid: node.uuid,
-        kind: 'Paragraph',
-        pathLabel,
-        paragraph_id: node.paragraph_id,
-        resultsCount: results.length,
-        latestRationale: latest?.response?.rationale,
-        latestRelevant: latest?.response?.relevant,
-        latestCost: latest?.usage?.total_cost,
-      });
-    } else if (node.type === 'Section' || node.type === 'Heading' || node.type === 'Subpart') {
-      // also add a heading row (optional)
-      out.push({ uuid: node.uuid, kind: node.type, pathLabel });
-    }
-
-    for (const c of node.children ?? []) walk(c, pathLabel ? [pathLabel] : []);
-  }
-
-  walk(outline, []);
-  return out;
-}
-
-/* -------------- Page -------------- */
-
-/* ---------------- Hierarchy renderers ---------------- */
-
-function ParagraphTable({ paragraphs }: { paragraphs: OutlineNode[] }) {
+function Chip({ children, dim = false, isBottom = false }: { children: React.ReactNode; dim?: boolean; isBottom?: boolean }) {
   return (
-    <table className="w-full text-xs border-collapse">
-      <thead>
-        <tr className="bg-gray-50 text-gray-600">
-          <th className="px-2 py-1 text-left">Paragraph</th>
-          <th className="px-2 py-1 text-left">Relevance</th>
-          <th className="px-2 py-1 text-left">Rationale</th>
-          <th className="px-2 py-1 text-left">Cost</th>
-        </tr>
-      </thead>
-      <tbody>
-        {paragraphs.map((p) => {
-          const results = p.results ?? [];
-          const latest = results.at(-1);
-          const rel = latest?.response?.relevant;
-          return (
-            <tr key={p.uuid} className="border-t">
-              <td className="px-2 py-1">{p.paragraph_id ?? "—"}</td>
-              <td className="px-2 py-1">
-                {rel === true ? (
-                  <Badge className="bg-green-600 text-white hover:bg-green-600">Relevant</Badge>
-                ) : rel === false ? (
-                  <Badge variant="destructive">Not</Badge>
-                ) : (
-                  <Badge variant="outline">—</Badge>
-                )}
-              </td>
-              <td className="px-2 py-1">{latest?.response?.rationale ?? "—"}</td>
-              <td className="px-2 py-1">{latest?.usage?.total_cost != null ? latest.usage.total_cost.toFixed(6) : "—"}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <span className={["badge-pill chip", dim ? "opacity-70" : "", isBottom ? "font-semibold bg-accent/40" : ""].join(" ")}>{children}</span>
   );
 }
 
-function SubpartAccordion({ subpart, statsById }: { subpart: OutlineNode; statsById: StatsById }) {
-  const s = statsById[subpart.uuid];
+function RelevancePill({ v }: { v: boolean | undefined }) {
+  if (v === true) return <span className="px-2 py-[2px] rounded-full text-[11px] bg-green-600 text-white">Relevant</span>;
+  if (v === false) return <span className="px-2 py-[2px] rounded-full text-[11px] bg-red-500 text-white">Not</span>;
+  return <span className="px-2 py-[2px] rounded-full text-[11px] border text-muted-foreground">—</span>;
+}
+
+function Money({ v }: { v?: number }) {
+  if (v == null) return <span className="text-muted-foreground">—</span>;
+  return <span className="font-mono tabular-nums">{v.toFixed(6)}</span>;
+}
+
+function Rationale({ text }: { text?: string }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return <span className="text-muted-foreground">—</span>;
   return (
-    <AccordionItem value={String(subpart.uuid)}>
-      <AccordionTrigger className="text-base font-semibold">
-        {subpart.label} {subpart.title ? `– ${subpart.title}` : ""}
-        <Counts s={s} />
-      </AccordionTrigger>
-      <AccordionContent className="space-y-2 ml-2">
-        {(subpart.children ?? []).map((sec) => (
-          <SectionCollapsible key={sec.uuid} section={sec} statsById={statsById} />
-        ))}
-      </AccordionContent>
-    </AccordionItem>
+    <button type="button" onClick={() => setOpen((x) => !x)} className="text-left w-full hover:bg-accent/40 rounded px-1 py-0.5" title={open ? "Collapse" : "Expand"}>
+      <span className={open ? "" : "line-clamp-2"}>{text}</span>
+    </button>
   );
 }
 
-function SectionCollapsible({ section, statsById }: { section: OutlineNode; statsById: StatsById }) {
-  const paragraphs = (section.children ?? []).filter((c) => c.type === "Paragraph");
-  const subHeadings = (section.children ?? []).filter((c) => c.type !== "Paragraph");
-  const s = statsById[section.uuid];
+function normalizeTracePath(labels: string[]): string[] {
+  if (!labels || labels.length === 0) return [];
+  const rest = labels.slice(1); // drop "CS …"
+  return rest.map(l => l.replace(/\(([A-Za-z]+)\)/g, (_, g1) => `(${g1.toLowerCase()})`));
+}
+
+function useLatestResult(row: TraceRow) {
+  const latest = row.results && row.results.length ? row.results[row.results.length - 1] : undefined;
+  const rel: boolean | undefined = latest?.response?.relevant;
+  const rat: string | undefined = latest?.response?.rationale;
+  const cost: number | undefined = latest?.usage?.total_cost;
+  return { latest, rel, rat, cost };
+}
+
+/* ---------------- Section rows w/ per-trace checkbox ---------------- */
+
+function RelevanceDot({ v }: { v: boolean | undefined }) {
+  const cls =
+    v === true
+      ? "bg-emerald-600"
+      : v === false
+      ? "bg-red-500"
+      : "bg-muted-foreground/40";
+  const label = v === true ? "Relevant" : v === false ? "Not relevant" : "—";
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className={`inline-block h-2.5 w-2.5 rounded-full ${cls}`}
+        title={label}
+        aria-label={label}
+      />
+      <span className="hidden sm:inline text-xs text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+function SectionTraceTableCompact({
+  rows,
+  selectedTraces,
+  setSelectedTraces,
+}: {
+  rows: TraceRow[];
+  selectedTraces: Set<string>;
+  setSelectedTraces: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
+  return (
+    <div className="trace-table rounded-lg border overflow-hidden">
+      {/* Header */}
+      <div className="grid grid-cols-[26px,1fr,140px,1fr,90px] items-center text-xs font-medium bg-accent/60 text-accent-foreground px-3 py-2 sticky top-0 z-10">
+        <div />
+        <div>Traces</div>
+        <div>Relevance</div>
+        <div>Rationale</div>
+        <div className="text-right pr-1">Cost</div>
+      </div>
+
+      {/* Rows */}
+      <div>
+          {rows.map((r) => {
+            const { rel, rat, cost } = useLatestResult(r);
+            const path = normalizeTracePath(r.path_labels || []);
+            const traceChecked = selectedTraces.has(r.trace_uuid);
+
+            return (
+              <div
+                key={r.trace_uuid}
+                className={[
+                  // ↓ five columns now
+                  "trace-row grid grid-cols-[26px,1fr,140px,1fr,90px] items-center px-3 py-2 text-sm relative",
+                  "hover:bg-accent/40 transition-colors",
+                ].join(" ")}
+              >
+                {/* left rail (kept) */}
+                <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-transparent" aria-hidden />
+
+                {/* checkbox */}
+                <div>
+                  <TriStateCheckbox
+                    checked={traceChecked}
+                    onChange={(checked) => {
+                      setSelectedTraces(prev => {
+                        const next = new Set(prev);
+                        if (checked) next.add(r.trace_uuid); else next.delete(r.trace_uuid);
+                        return next;
+                      });
+                    }}
+                    title="Select trace"
+                  />
+                </div>
+
+                {/* path chips */}
+                <div className="flex flex-wrap items-center gap-1 min-w-0">
+                  {path.map((p, idx) => {
+                    const isLast = idx === path.length - 1;
+                    return (
+                      <span
+                        key={idx}
+                        className={["badge-pill chip", isLast ? "is-bottom" : ""].join(" ")}
+                        title={p}
+                      >
+                        {p}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* relevance */}
+                <div className="pl-2">
+                  <RelevanceDot v={rel} />
+                </div>
+
+                {/* rationale */}
+                <div className="px-2">
+                  {rat ? <span className="block line-clamp-2 text-sm" title={rat}>{rat}</span>
+                       : <span className="text-muted-foreground">—</span>}
+                </div>
+
+                {/* cost */}
+                <div className="text-right pr-1 font-mono tabular-nums text-sm">
+                  {cost == null ? <span className="text-muted-foreground">—</span> : cost.toFixed(6)}
+                </div>
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Section & Subpart renderers w/ header checkbox ---------------- */
+
+function SectionCollapsible({
+  section,
+  sectionTraces,
+  sectionStats,
+  selectedTraces,
+  setSelectedTraces,
+}: {
+  section: OutlineNode;
+  sectionTraces: Record<string, TraceRow[]>;
+  sectionStats: Record<string, NodeStats>;
+  selectedTraces: Set<string>;
+  setSelectedTraces: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
+  const s = sectionStats[section.uuid];
+  const traces = sectionTraces[section.uuid] || [];
+  const sel = selectionStateForNode(section, sectionTraces, selectedTraces);
+  const headerTitle =
+  section.label
+    ?? (section.number && section.title
+          ? `${section.number} ${section.title}`
+          : section.number ?? section.title ?? "Section");
 
   return (
     <Collapsible>
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" size="sm" className="w-full justify-between text-sm font-medium">
-          <span className="truncate text-left">
-            {section.number ? `${section.number} ${section.title ?? ""}` : section.label}
-          </span>
-          <Counts s={s} />
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="ml-4 space-y-2">
-        {paragraphs.length > 0 && <ParagraphTable paragraphs={paragraphs} />}
-        {subHeadings.map((h) => (
-          <SectionCollapsible key={h.uuid} section={h} statsById={statsById} />
-        ))}
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <TriStateCheckbox
+            checked={sel.checked}
+            indeterminate={sel.indeterminate}
+            onChange={(checked) => {
+              setSelectedTraces(prev => {
+                const next = new Set(prev);
+                for (const id of sel.ids) checked ? next.add(id) : next.delete(id);
+                return next;
+              });
+            }}
+          />
+          <CollapsibleTrigger asChild>
+            <button className="px-2 py-1 text-sm font-medium rounded hover:bg-accent/40 data-[state=open]:underline truncate">
+              {headerTitle}
+            </button>
+          </CollapsibleTrigger>
+        </div>
+        <StatPills s={s} />
+      </div>
+
+      {/* Body */}
+      <CollapsibleContent className="mt-2 pl-6">
+        {traces.length > 0 ? (
+          <SectionTraceTableCompact
+            rows={traces}
+            selectedTraces={selectedTraces}
+            setSelectedTraces={setSelectedTraces}
+          />
+        ) : (
+          <div className="text-xs text-muted-foreground border rounded px-3 py-2">
+            No traces under this section.
+          </div>
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
 }
 
-export default function BrowseCertSpecV2Page() {
+function HeadingCollapsible({
+  heading,
+  sectionTraces,
+  sectionStats,
+  selectedTraces,
+  setSelectedTraces,
+}: {
+  heading: OutlineNode;
+  sectionTraces: Record<string, TraceRow[]>;
+  sectionStats: Record<string, NodeStats>;
+  selectedTraces: Set<string>;
+  setSelectedTraces: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
+  const agg = useMemo(() => {
+    const sectionIds = collectSectionIds(heading);
+    return sectionIds.reduce((sum, sid) => addStats(sum, sectionStats[sid] || zeroStats()), zeroStats());
+  }, [heading, sectionStats]);
+
+  const sel = selectionStateForNode(heading, sectionTraces, selectedTraces);
+
+  return (
+    <Collapsible>
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <TriStateCheckbox
+            checked={sel.checked}
+            indeterminate={sel.indeterminate}
+            onChange={(checked) => {
+              setSelectedTraces(prev => {
+                const next = new Set(prev);
+                for (const id of sel.ids) checked ? next.add(id) : next.delete(id);
+                return next;
+              });
+            }}
+          />
+          <CollapsibleTrigger asChild>
+            <button className="px-2 py-1 text-sm font-medium rounded hover:bg-accent/40 data-[state=open]:underline truncate">
+              {heading.label}
+            </button>
+          </CollapsibleTrigger>
+        </div>
+        <StatPills s={agg} />
+      </div>
+
+      {/* Children */}
+      <CollapsibleContent className="mt-2 pl-6 space-y-2">
+          <div className="zebra-list rounded-md overflow-hidden">
+            {(heading.children ?? []).map((n) =>
+              n.type === 'Section' ? (
+                <SectionCollapsible
+                  key={n.uuid}
+                  section={n}
+                  sectionTraces={sectionTraces}
+                  sectionStats={sectionStats}
+                  selectedTraces={selectedTraces}
+                  setSelectedTraces={setSelectedTraces}
+                />
+              ) : n.type === 'Heading' ? (
+                <HeadingCollapsible
+                  key={n.uuid}
+                  heading={n}
+                  sectionTraces={sectionTraces}
+                  sectionStats={sectionStats}
+                  selectedTraces={selectedTraces}
+                  setSelectedTraces={setSelectedTraces}
+                />
+              ) : null
+            )}
+          </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function SubpartAccordion({
+  subpart,
+  sectionTraces,
+  sectionStats,
+  selectedTraces,
+  setSelectedTraces,
+}: {
+  subpart: OutlineNode;
+  sectionTraces: Record<string, TraceRow[]>;
+  sectionStats: Record<string, NodeStats>;
+  selectedTraces: Set<string>;
+  setSelectedTraces: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
+  const agg = useMemo(() => {
+    const sum = zeroStats();
+    const stack = [subpart];
+    while (stack.length) {
+      const node = stack.pop()!;
+      if (node.type === 'Section') {
+        const s = sectionStats[node.uuid] || zeroStats();
+        sum.total += s.total; sum.relevant += s.relevant; sum.notRelevant += s.notRelevant;
+      }
+      for (const c of node.children ?? []) stack.push(c);
+    }
+    return sum;
+  }, [subpart, sectionStats]);
+
+  const sel = selectionStateForNode(subpart, sectionTraces, selectedTraces);
+
+  return (
+    <AccordionItem value={String(subpart.uuid)}>
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <TriStateCheckbox
+            checked={sel.checked}
+            indeterminate={sel.indeterminate}
+            onChange={(checked) => {
+              setSelectedTraces(prev => {
+                const next = new Set(prev);
+                for (const id of sel.ids) checked ? next.add(id) : next.delete(id);
+                return next;
+              });
+            }}
+          />
+          <AccordionTrigger className="flex-1 text-left px-2 py-1 rounded hover:no-underline hover:bg-accent/40 truncate">
+            {subpart.label
+                ?? (subpart.code
+                      ? `SUBPART ${subpart.code}${subpart.title ? ` – ${subpart.title}` : ""}`
+                      : subpart.title ?? "Subpart")}
+          </AccordionTrigger>
+        </div>
+        <StatPills s={agg} />
+      </div>
+
+      {/* Children */}
+      <AccordionContent className="mt-2 pl-6 space-y-2">
+          <div className="zebra-list rounded-md overflow-hidden">
+            {(subpart.children ?? []).map((child) =>
+              child.type === 'Section' ? (
+                <SectionCollapsible
+                  key={child.uuid}
+                  section={child}
+                  sectionTraces={sectionTraces}
+                  sectionStats={sectionStats}
+                  selectedTraces={selectedTraces}
+                  setSelectedTraces={setSelectedTraces}
+                />
+              ) : child.type === 'Heading' ? (
+                <HeadingCollapsible
+                  key={child.uuid}
+                  heading={child}
+                  sectionTraces={sectionTraces}
+                  sectionStats={sectionStats}
+                  selectedTraces={selectedTraces}
+                  setSelectedTraces={setSelectedTraces}
+                />
+              ) : (
+                <div key={child.uuid} className="ml-2 text-sm text-gray-700">
+                  {child.label}
+                </div>
+              )
+            )}
+          </div>
+      </AccordionContent>
+    </AccordionItem>
+  );
+}
+/* ---------------- Main Page ---------------- */
+
+export default function BrowseCertSpecV3Page() {
   const [outline, setOutline] = useState<OutlineNode | null>(null);
 
-  // ---- NEW: streaming state ----
-  const [query, setQuery] = useState(
-    'Are there CS-25 rules relevant to approaches below 200 ft decision height, and why?'
-  );
+  // per-section trace rows + lookup (from backend)
+  const [sectionTraces, setSectionTraces] = useState<Record<string, TraceRow[]>>({});
+  const [traceLookup, setTraceLookup] = useState<Record<string, { section_uuid: string; index: number; bottom_uuid: string }>>({});
+
+  // streaming state
+  const [query, setQuery] = useState('Are there CS-25 rules relevant to approaches below 200 ft decision height, and why?');
   const [running, setRunning] = useState(false);
-  const [events, setEvents] = useState<AnyEvent[]>([]);
+  const [log, setLog] = useState<StreamLine[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load outline once
+  // run status
+  const [totalTraces, setTotalTraces] = useState<number>(0);
+  const [doneTraces, setDoneTraces] = useState<number>(0);
+  const [runCost, setRunCost] = useState<number>(0);
+
+  // selection state (trace UUIDs)
+  const [selectedTraces, setSelectedTraces] = useState<Set<string>>(new Set());
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  // Load outline + trace rows once
   useEffect(() => {
     (async () => {
       try {
         const url = `${BASE}/agents/cs25/outline`;
         const res = await fetch(url);
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`Outline ${res.status}: ${text}`);
-        }
-        const ct = res.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) {
-          const text = await res.text();
-          throw new Error(`Expected JSON, got: ${text.slice(0, 200)}`);
-        }
+        if (!res.ok) throw new Error(`Outline ${res.status}`);
         const data = await res.json();
         setOutline(data.outline ?? null);
+        setSectionTraces(data.section_traces ?? {});
+        setTraceLookup(data.trace_lookup ?? {});
       } catch (err) {
         console.error('Outline load failed:', err);
       }
     })();
-  }, []); // ← keep empty & stable
+  }, []);
 
-  // ---- NEW: start/stop streaming ----
+  // handler for reset
+  const resetAll = useCallback(() => {
+      // stop any in-flight run
+      abortRef.current?.abort();
+      setRunning(false);
+
+      // clear streamed results from rows
+      setSectionTraces(prev => stripResults(prev));
+
+      // clear selections + console + counters
+      setSelectedTraces(new Set());
+      setLog([]);
+      setTotalTraces(0);
+      setDoneTraces(0);
+      setRunCost(0);
+  }, []);
+
+  // live stats per SECTION from trace rows
+  const sectionStats = useMemo(() => {
+    const m: Record<string, NodeStats> = {};
+    for (const [sid, rows] of Object.entries(sectionTraces)) m[sid] = statsFromTraceRows(rows);
+    return m;
+  }, [sectionTraces]);
+
+  // Start/Stop streaming
   const start = useCallback(async () => {
-    if (!outline) return; // outline first
-    setEvents([]);
+    const ids = Array.from(selectedTraces);
+    if (ids.length === 0) {
+        setLog(prev => [...prev, { ts: Date.now(), text: 'ℹ nothing selected — tick subparts/sections/traces first' }]);
+        return;
+    }
+
+    setLog([]);
     setRunning(true);
+
+    // set totals immediately so the UI shows the correct denominator
+    setTotalTraces(ids.length);
+    setDoneTraces(0);
+    setRunCost(0);
+
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -343,34 +779,72 @@ export default function BrowseCertSpecV2Page() {
     try {
       await streamNdjson(
         `${BASE}/agents/cs25/stream`,
-        { query, model: 'gpt-5-nano', batch_size: 5, limit: 10, pricing_per_million: [0.05, 0.40] },
+        {
+            query,
+            model: 'gpt-5-nano',
+            batch_size: 200,
+            limit: null,
+            pricing_per_million: [0.05, 0.40],
+            selected_trace_ids: ids,
+        },
         ac.signal,
         (evt) => {
-          setEvents((prev) => [...prev, evt]);
+          if (evt.type === 'run_start') {
+              // trust the server if it matches; otherwise keep our selected count
+              const serverTotal = Number(evt.total_traces ?? NaN);
+              if (!Number.isNaN(serverTotal) && serverTotal > 0) {
+                setTotalTraces(serverTotal);
+              }
+              setDoneTraces(0);
+              setRunCost(0);
+          }
           if (evt.type === 'item_done') {
-            const item = (evt as ItemDone).item;
-            const uuid = item?.bottom_uuid;
-            if (uuid) {
-              // immutably append the result to the right paragraph
-              setOutline((prev) => appendResult(prev, uuid, item));
+            setDoneTraces((d) => d + 1);
+            const it = (evt as ItemDone).item;
+            const c = Number(it?.usage?.total_cost ?? 0);
+            if (!Number.isNaN(c) && c > 0) setRunCost((prev) => prev + c);
+
+            const tId = it?.trace_uuid;
+            if (tId) {
+              setSectionTraces((prev) => {
+                const next = { ...prev };
+                const loc = traceLookup[tId];
+                if (!loc) return next;
+                const arr = next[loc.section_uuid] ? [...next[loc.section_uuid]] : [];
+                const row = { ...(arr[loc.index] || {}) };
+                row.results = [...(row.results || []), it];
+                arr[loc.index] = row;
+                next[loc.section_uuid] = arr;
+                return next;
+              });
             }
           }
+          if (evt.type === 'run_end') {
+            const est = Number(evt?.summary?.estimated_cost ?? NaN);
+            if (!Number.isNaN(est) && est >= 0) setRunCost(est);
+            const tt = Number(evt?.summary?.total_traces ?? NaN);
+            if (!Number.isNaN(tt) && tt > 0) setTotalTraces(tt);
+          }
+
+          const newLines = eventToLines(evt);
+          if (newLines.length) setLog((prev) => (prev.length ? [...prev, ...newLines] : newLines));
         }
       );
     } catch (e) {
-      console.error(e);
-      setEvents((prev) => [...prev, { type: 'error', error: String(e) } as AnyEvent]);
+      if (isAbortError(e)) setLog((prev) => [...prev, { ts: Date.now(), text: '■ run aborted' }]);
+      else {
+        console.error(e);
+        setLog((prev) => [...prev, { ts: Date.now(), text: `⚠ error ${String(e)}` }]);
+      }
     } finally {
       setRunning(false);
     }
-  }, [outline, query]);
+  }, [query, selectedTraces, traceLookup]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
     setRunning(false);
   }, []);
-
-  const statsById = useMemo(() => computeStats(outline), [outline]);
 
   if (!outline) return <div className="p-6">Loading outline…</div>;
 
@@ -379,13 +853,11 @@ export default function BrowseCertSpecV2Page() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">CS-25 Outline</h1>
-        <p className="text-sm text-gray-600">
-          Expand subparts/sections. Run a query to stream relevance per paragraph.
-        </p>
+        <h1 className="text-xl font-semibold">CS-25 — Traces by Section</h1>
+        <p className="text-sm text-gray-600">Tick subparts/sections/traces and run the agent only for those selections.</p>
       </header>
 
-      {/* ---- NEW: query + run/stop ---- */}
+      {/* Query + Run */}
       <section className="space-y-3">
         <label className="block text-sm font-medium">User query</label>
         <textarea
@@ -394,7 +866,7 @@ export default function BrowseCertSpecV2Page() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Ask about CS-25…"
         />
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
           <Button onClick={start} disabled={running} className="px-4">
             {running ? 'Streaming…' : 'Run'}
           </Button>
@@ -403,40 +875,40 @@ export default function BrowseCertSpecV2Page() {
               Stop
             </Button>
           )}
+          <Button
+            variant="ghost"
+            onClick={resetAll}
+            disabled={running}
+            className="px-3"
+            title="Reset all results and selections"
+          >
+            Reset
+          </Button>
+          <div className="ml-auto">
+            <StatusInline running={running} total={totalTraces} done={doneTraces} cost={runCost} />
+          </div>
         </div>
       </section>
 
       {/* Outline (collapsible) */}
       <section>
-          <Accordion type="multiple" className="w-full space-y-2">
-            {subparts.map((sp) => (
-              <SubpartAccordion key={sp.uuid} subpart={sp} statsById={statsById} />
-            ))}
-          </Accordion>
+        <Accordion type="multiple" className="w-full space-y-2">
+          {subparts.map((sp) => (
+            <SubpartAccordion
+              key={sp.uuid}
+              subpart={sp}
+              sectionTraces={sectionTraces}
+              sectionStats={sectionStats}
+              selectedTraces={selectedTraces}
+              setSelectedTraces={setSelectedTraces}
+            />
+          ))}
+        </Accordion>
       </section>
 
-      {/* ---- NEW: small debug panel for streamed events ---- */}
+      {/* Stream console */}
       <section className="space-y-2">
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="justify-start">
-              {events.length ? `Events (${events.length})` : 'Events (none)'}
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="border rounded p-3 max-h-[260px] overflow-auto text-xs font-mono bg-white">
-              {events.length === 0 ? (
-                <div className="text-gray-500">No events yet.</div>
-              ) : (
-                events.map((evt, i) => (
-                  <pre key={i} className="whitespace-pre-wrap">
-                    {JSON.stringify(evt, null, 2)}
-                  </pre>
-                ))
-              )}
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+        <StreamConsole lines={log} />
       </section>
     </div>
   );
