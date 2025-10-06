@@ -1,12 +1,13 @@
 // app/components/app-shell.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { useConsoleStore } from "@/stores/console-store";
 import { useConsoleOffsetVar } from "@/hooks/useConsoleOffsetVar";
-
 import { useUser } from "@/hooks/useUser";
 import { UserMenu } from "@/components/user-menu";
 import { ModeToggle } from "@/components/mode-toggle";
@@ -15,20 +16,18 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+
 import {
   Home, Network, FileText, Settings, Menu, Users,
   ChevronLeft, ChevronRight,
 } from "lucide-react";
-
-import dynamic from "next/dynamic";
+import { type LucideIcon } from "lucide-react";
 
 const ConsolePanels = dynamic(() => import("@/components/console/ConsolePanels"), {
   ssr: false,
 });
 
 /* --- Nav items --- */
-import type { LucideIcon } from "lucide-react";
-
 type NavLink = {
   href: string;
   label: string;
@@ -59,6 +58,7 @@ const NAV_ITEMS: NavItem[] = [
       { label: "Browse cert spec V1", href: "/system-b/browse-cert-specs-V1", icon: Users },
       { label: "Browse cert spec V2", href: "/system-b/browse-cert-specs-V2", icon: Users },
       { label: "Browse cert spec V3", href: "/system-b/browse-cert-specs-V3", icon: Users },
+      { label: "Browse cert spec V4", href: "/system-b/browse-cert-specs-V4", icon: Users },
       { label: "Functional Ontology V1", href: "/system-a/functional-ontology-V1", icon: Users },
       { label: "Functional Ontology V2", href: "/system-a/functional-ontology-V2", icon: Users },
       { label: "Functional Ontology V3", href: "/system-a/functional-ontology-V3", icon: Users },
@@ -66,8 +66,22 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
+/* --- helper: best label for a pathname from NAV_ITEMS --- */
+function resolvePageTitle(pathname: string): string | undefined {
+  for (const i of NAV_ITEMS) {
+    if ("children" in i) {
+      for (const c of i.children) {
+        if (pathname.startsWith(c.href)) return c.label;
+      }
+    } else if (pathname.startsWith(i.href)) {
+      return i.label;
+    }
+  }
+  return undefined;
+}
+
 /* --- NavItem --- */
-function NavItem({
+function NavItemRow({
   href,
   icon: Icon,
   label,
@@ -91,7 +105,7 @@ function NavItem({
       aria-current={active ? "page" : undefined}
       title={collapsed ? label : undefined}
     >
-      <Icon className="h-5 w-5 shrink-0" />
+      {Icon ? <Icon className="h-5 w-5 shrink-0" /> : null}
       {!collapsed && <span className="truncate">{label}</span>}
     </Link>
   );
@@ -148,15 +162,15 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
         const cls = active ? base + " bg-muted" : base + " hover:bg-muted";
         return (
           <Link
-            key={item.href}
-            href={item.href}
+            key={(item as NavLink).href}
+            href={(item as NavLink).href}
             className={cls}
-            aria-label={item.label}
+            aria-label={(item as NavLink).label}
             aria-current={active ? "page" : undefined}
-            title={collapsed ? item.label : undefined}
+            title={collapsed ? (item as NavLink).label : undefined}
           >
             {Icon ? <Icon className="h-5 w-5 shrink-0" /> : null}
-            {!collapsed && <span className="truncate">{item.label}</span>}
+            {!collapsed && <span className="truncate">{(item as NavLink).label}</span>}
           </Link>
         );
       })}
@@ -166,7 +180,15 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
 
 /* --- AppShell --- */
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  useConsoleOffsetVar(); // <-- keeps --console-offset current
+  const pathname = usePathname();
+  const setContext = useConsoleStore(s => s.setContext);   // <— get the setter
+
+  useEffect(() => {
+    const label = resolvePageTitle(pathname || "/") ?? "Chat";
+    setContext(label);                                     // <— just pass the title (no keys yet)
+  }, [pathname, setContext]);
+
+  useConsoleOffsetVar(); // keeps --console-offset current
   const [collapsed, setCollapsed] = useState(false);
   const { data } = useUser();
   const authed = !!data?.authenticated;
