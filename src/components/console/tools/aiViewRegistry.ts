@@ -5,6 +5,8 @@
 const registry: Record<string, () => Promise<{ default: React.ComponentType<any> }>> = {
   "/tests/console-bus-test": () =>
     import("@/app/(protected)/tests/console-bus-test/console_ai_view"),
+  "/system-b/browse-cert-specs-V4": () =>
+    import("@/app/(protected)/system-b/browse-cert-specs-V4/console_ai_view"),
   // "/system-b/browse-cert-specs-v4": () =>
   //   import("@/app/(protected)/system-b/browse-cert-specs-v4/console_ai_view"),
 };
