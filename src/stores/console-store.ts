@@ -212,7 +212,7 @@ export const useConsoleStore = create<ConsoleState>()(
       lastMessage: undefined,
       sendToPage: (tabId, payload) => {
         const flowId = payload?.__flowId ?? get().aiBindings[tabId]?.manifest?.flowId;
-        set({ lastMessage: { tabId, type: "ai_message", payload, ts: Date.now() } });
+        set({ lastMessage: { tabId, type: "bus_message", payload, ts: Date.now() } });
         logSystem("bus:to-page", { tabId, hasPayload: payload != null, flowId }, "console/bus", "Sent a message from console to page");
       },
 

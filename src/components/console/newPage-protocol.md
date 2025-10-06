@@ -1,3 +1,17 @@
+🧭 Goal
+
+Every new page in your app should automatically:
+	•	connect to the console,
+	•	link to its AI tab (so the right tab shows the right feed), and
+	•	send/receive messages through the bus (envelopes).
+
+You don’t want to rewrite logic every time — you just want a small, standard setup.
+
+⸻
+# Use a helper template for new pages
+
+You can make a simple template ConsoleAwarePage.tsx:
+```
 "use client";
 
 import { useAiChannel } from "@/components/console/bus";
@@ -37,3 +51,12 @@ export default function ConsoleAwarePage() {
     </div>
   );
 }
+```
+
+🧠 What this gives you
+
+✅ Two-way communication ready on every page
+✅ Automatic tab ↔ page binding
+✅ No manual setCurrentPageId calls
+✅ One consistent message format (envelopes)
+✅ Future-proof for Traces, Logs, or other console tools

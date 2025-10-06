@@ -62,8 +62,7 @@ const NAV_ITEMS: NavItem[] = [
       { label: "Functional Ontology V1", href: "/system-a/functional-ontology-V1", icon: Users },
       { label: "Functional Ontology V2", href: "/system-a/functional-ontology-V2", icon: Users },
       { label: "Functional Ontology V3", href: "/system-a/functional-ontology-V3", icon: Users },
-      { label: "Console test", href: "/tests/console-test", icon: Users },
-      { label: "Console ai-bus test", href: "/tests/ai-bus-test", icon: Users },
+      { label: "Console ai-bus test", href: "/tests/console-bus-test", icon: Users },
     ],
   },
 ];

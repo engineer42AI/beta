@@ -6,6 +6,24 @@ import { Button } from "@/components/ui/button";
 import { useConsoleStore, type ChatMsg } from "@/stores/console-store";
 import { cn } from "@/lib/utils";
 
+const makeId = () =>
+  (typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+
+type Envelope = {
+  v: number;
+  id: string;
+  ts: number;
+  scope: "ai";
+  dir: "page→console" | "console→page";
+  route: string;
+  pageId?: string;
+  tabId?: string;
+  topic?: string;
+  payload?: any;
+};
+
 export default function AIPanel() {
   // --- store selectors (tab-scoped) ---
   const activeTabId       = useConsoleStore(s => s.activeTabId.ai);
@@ -49,6 +67,34 @@ export default function AIPanel() {
     requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   }, [messages]);
 
+  // Helper: handle a bus envelope from the page
+  const handleBusFromPage = (env: Envelope) => {
+    if (env.scope !== "ai" || env.dir !== "page→console") return;
+    const p = env.payload ?? {};
+
+    switch (env.topic) {
+      case "ui.prefill":
+        if (typeof p.text === "string") setDraft(activeTabId!, p.text);
+        return;
+
+      case "chat.user":
+        if (typeof p.text === "string") appendUser(activeTabId!, p.text);
+        return;
+
+      case "chat.assistant":
+        if (typeof p.text === "string") appendAssistant(activeTabId!, p.text);
+        return;
+
+      case "chat.reset":
+        resetChat(activeTabId!);
+        return;
+
+      default:
+        // Unknown topic -> ignore (or log if you want)
+        return;
+    }
+  };
+
   // page -> console (tab-scoped) into current tab
   useEffect(() => {
     if (!activeTabId || !lastConsoleEvent) return;
@@ -61,6 +107,17 @@ export default function AIPanel() {
 
     const { type, payload } = lastConsoleEvent;
 
+    // ----- NEW: generic bus envelope -----
+    if (type === "bus_message" && payload) {
+      try {
+        handleBusFromPage(payload as Envelope);
+      } catch {
+        // swallow malformed messages
+      }
+      return;
+    }
+
+    // ----- Legacy types (keep for backward compat) -----
     if (type === "prefill_input" && typeof payload?.text === "string") {
       setDraft(activeTabId, payload.text);
       return;
@@ -84,13 +141,27 @@ export default function AIPanel() {
     const q = (draft || "").trim();
     if (!q) return;
 
+    // Update local chat UI
     appendUser(activeTabId, q);
     appendAssistant(activeTabId, "(MVP echo) " + q);
     setDraft(activeTabId, "");
 
+    // If the tab is bound to a page, send a bus envelope back
     const binding = getBinding(activeTabId);
     if (binding) {
-      sendToPage(activeTabId, { text: q });
+      const env: Envelope = {
+        v: 1,
+        id: makeId(),
+        ts: Date.now(),
+        scope: "ai",
+        dir: "console→page",
+        route: binding.route,
+        pageId: binding.pageId,
+        tabId: activeTabId,
+        topic: "chat.assistant",
+        payload: { text: "(MVP echo) " + q },
+      };
+      sendToPage(activeTabId, env);
     }
   };
 
