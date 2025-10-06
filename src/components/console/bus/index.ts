@@ -1,14 +1,28 @@
 // src/components/console/bus/index.ts
-import { useBusChannel } from "./useBusChannel";
+import { usePageBusChannel, useConsoleBusChannel } from "./useBusChannel";
 
+/* Page-side  */
 export const useAiChannel = () => {
-  const ch = useBusChannel("ai");
+  const ch = usePageBusChannel("ai");
   return {
     sendToAiConsole: ch.send,
     feedFromAiConsole: ch.feed,
     boundAiTabId: ch.boundTabId,
     isBoundToAiConsole: ch.isBound,
     canSendToAiConsole: ch.canSend,
+  };
+};
+
+/* Console-side */
+export const useAiConsoleChannel = (opts?: { maxFeed?: number }) => {
+  const ch = useConsoleBusChannel("ai", opts);
+  return {
+    sendToPage: ch.sendToPage,
+    feedFromPage: ch.feedFromPage,
+    activeAiTabId: ch.activeAiTabId,
+    isLinkedToPage: ch.isLinkedToPage,
+    binding: ch.binding,
+    clearFeedForCurrentTab: ch.clearFeedForCurrentTab,
   };
 };
 

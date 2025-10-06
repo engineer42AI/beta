@@ -77,25 +77,46 @@ It’s the visual brain of the console — managing what tool and which tab is c
 
 ⸻
 
-# 3️⃣ src/components/console/tools/AIPanel.tsx
+# 🧩 3️⃣ src/components/console/tools/AIPanel.tsx
 
 🧠 Role:
-This is the AI chat tool itself — the part of your console where the AI messages appear.
+This is the AI console container — a dynamic loader and host for whichever AI view is active in the current console tab.
+It no longer holds the chat logic directly; instead, it delegates rendering to a registered view (like console_ai_view.tsx) using the AI View Registry.
 
 📦 Think of it as:
-The chat window inside your AI console tab.
+The window frame for your AI console tab — it doesn’t care what’s inside; it just knows how to display the right AI tool view dynamically.
 
 🛠️ What it does:
-	•	Displays chat messages (user and assistant)
-	•	Lets you type prompts and send them
-	•	Sends and receives messages through the bus (page ↔ console)
-	•	Knows which tab it belongs to
-	•	Updates chat UI automatically when new messages arrive
+	•	Dynamically loads a matching AI view (e.g., /tests/console-bus-test/console_ai_view.tsx) for the currently active tab.
+	•	If no view is registered or fails to load, shows a fallback panel.
+	•	Reactively re-renders when the active AI tab changes.
+	•	Handles runtime isolation — each tab’s view is self-contained.
+	•	Works seamlessly even if a view doesn’t exist for a tab (graceful fallback).
 
 💬 In short:
+AIPanel is the view orchestrator for your AI console tabs.
+It figures out which React component should be rendered for the current AI tab and ensures the right view is shown, bound, and interactive — whether it’s a chat, graph explorer, or LangGraph runtime UI.
 
-It’s the actual AI chat panel — your interface to talk to AI and exchange messages with the page.
+⸻
 
+# 🧩 3️⃣.1 src/components/console/tools/aiViewRegistry.ts
+
+🧠 Role:
+This is the registry and lookup system for all AI views — the mapping layer that tells the AIPanel which React component to load for each console tab or route.
+
+📦 Think of it as:
+A directory of AI tool views, where each page or module can register its own specialized AI interface.
+
+🛠️ What it does:
+	•	Keeps a centralized list of all known AI view components (usually by route or namespace).
+	•	Supports dynamic imports, so missing views don’t break the build — they just fall back gracefully.
+	•	Allows new AI views (like console_ai_view.tsx) to register themselves without editing AIPanel.
+	•	Can be extended to support lazy loading, manifest-based discovery, or even LangGraph integration.
+	•	Enables one consistent mechanism for mapping routes ↔ AI tool UIs.
+
+💬 In short:
+aiViewRegistry is the AI view router for your console — it tells AIPanel which component to show for each AI tab.
+It makes the AI console extensible and modular: each page or subsystem can define its own custom AI view, and the console will load it automatically.
 ⸻
 
 # 4️⃣ src/stores/console-store.ts
@@ -142,25 +163,6 @@ It’s a helper module that manages the relationship logic between pages and con
 
 ⸻
 
-# 6️⃣ Your test page (e.g. src/app/test/console-test/page.tsx)
-
-🧠 Role:
-This is just a page example showing how your console and bus system interact.
-
-📦 Think of it as:
-A test bench — where the “main app” lives and sends/receives messages with the console.
-
-🛠️ What it does:
-	•	Registers itself with a unique page ID
-	•	Listens for incoming messages from the console
-	•	Displays messages that come from the AI tab
-	•	Sends test payloads to the console to confirm communication
-
-💬 In short:
-
-It’s your playground to test the communication loop between page and console.
-
-⸻
 
 🧠 So what happens when you run the app
 	1.	ConsolePanels creates the split view (main app + console)
@@ -190,51 +192,105 @@ page.tsx (test)
 Example page that sends and receives messages
 
 
-# 4️⃣ src/components/console/bus/useBusChannel.ts
+# 🧩 4️⃣ src/components/console/bus/useBusChannel.ts
 
 🧠 Role:
-This is the core communication hook — it powers all message exchange between pages and console tabs.
-It’s scope-agnostic, meaning it works for AI, Traces, Logs, or any other console tool you add in the future.
+This is the core communication engine of your console architecture — the single source of truth for how pages and console tabs exchange structured messages.
+It now contains two hooks:
+	•	usePageBusChannel() → for the page side (page ↔ console)
+	•	useConsoleBusChannel() → for the console AI view side (console ↔ page)
 
 📦 Think of it as:
-A universal message pipeline for your app — like the network cable connecting every page and console tool.
+A two-way “data bus” with two plugs — one for the page, one for the console.
+Each side speaks through a standardized “envelope” protocol, ensuring messages always reach the right tab and page.
 
 🛠️ What it does:
-	•	Defines how a page identifies itself (pageId, route) and registers with the console store.
-	•	Tracks which console tab is bound to this page using the manifest stored in Zustand.
-	•	Creates and sends structured message “envelopes” from page → console.
-	•	Listens for and filters incoming envelopes from console → page, only showing messages meant for this specific page and tab.
-	•	Keeps per-tab message feeds so switching tabs doesn’t mix messages.
-	•	Computes binding state flags (isBound, canSend, etc.) so the UI always knows whether it’s safe to send or receive.
+
+Page side (usePageBusChannel)
+	•	Identifies each page instance with a pageId and links it to a console tab using Zustand manifest.
+	•	Sends structured envelopes from page → console (with topic, payload, etc.).
+	•	Listens for messages from console → page, but only those addressed to this page and tab.
+	•	Maintains a local in-memory feed of incoming messages for the active tab.
+	•	Computes helpful flags like isBound, canSend, etc.
+
+Console side (useConsoleBusChannel)
+	•	Mirrors the same system but from the console’s perspective.
+	•	Listens for page → console messages coming from the active tab.
+	•	Maintains a lightweight per-tab message feed using module-level Maps (CONSOLE_FEED, CONSOLE_SEEN) — independent of Zustand.
+	•	Sends messages from console → page using the same envelope format.
+	•	Offers utilities like clearFeedForCurrentTab() for per-tab message management.
 
 💬 In short:
-This hook is the low-level bus driver — it moves data between pages and console tabs safely, keeps track of who’s linked to who, and makes sure messages only go where they should.
+This file is the heart of your interconnect system — it defines how pages and console tabs recognize, bind, and communicate with each other in a consistent, scope-agnostic way (AI, Traces, Logs, etc.).
 
-**ENVELOPE** lives here - Envelope (lives inside useBusChannel.ts)
-🧠 Role:
-Defines the standard message format used by all console tools — AI, Traces, Logs, etc.
+🧠 ENVELOPE (defined inside this file)
+💡 Role:
+The standard message format for all communication in the console ecosystem.
 
 ⸻
 
-# 5️⃣ src/components/console/bus/index.ts
+# 🧩 5️⃣ src/components/console/bus/index.ts
 
 🧠 Role:
-This is a specialized wrapper around useBusChannel — built specifically for the AI console tab.
+This is a scope-specific wrapper around the generic bus — specialized for the AI console.
 
 📦 Think of it as:
-A walkie-talkie tuned to the AI frequency.
-It uses the same bus underneath but filters and names everything so it’s clear this channel talks only to the AI console.
+A walkie-talkie tuned to the “AI” frequency.
+It uses the universal bus under the hood but renames and filters everything to make it clear you’re talking only to the AI console tab.
 
 🛠️ What it does:
-	•	Calls useBusChannel("ai") to get the general bus logic but scoped to the AI tool.
-	•	Renames outputs so they’re instantly self-descriptive:
+	•	Calls usePageBusChannel("ai") internally.
+	•	Renames its output for readability:
 	•	sendToAiConsole → send message to AI tab
-	•	feedFromAiConsole → all messages received from AI tab
-	•	boundAiTabId, isBoundToAiConsole, canSendToAiConsole → clear status indicators
-	•	Keeps your code future-proof — when you add a Traces or Logs console, you’ll just create similar wrappers (useTracesChannel, useLogsChannel, etc.)
+	•	feedFromAiConsole → listen to messages from AI tab
+	•	boundAiTabId, isBoundToAiConsole, canSendToAiConsole → clear, semantic binding indicators
+	•	Provides a clean interface that pages can use without worrying about internal bus logic.
 
 💬 In short:
-It’s the AI-specific communication channel — giving every page a simple, readable API to talk to its AI console tab without touching the lower-level bus details.
+It’s a friendly alias for the AI-specific message channel, letting pages use human-readable APIs while still riding on the universal, robust bus system underneath.
 
 ⸻
+
+# 🧩 6️⃣ app/(protected)/tests/console-bus-test/page.tsx
+
+🧠 Role:
+A page template that demonstrates how any page in your app can become “console-aware.”
+It uses the AI bus channel to send and receive messages from the AI console tab.
+
+📦 Think of it as:
+A page-side walkie-talkie — a test page that can talk to the AI console in real time.
+
+🛠️ What it does:
+	•	Uses useAiChannel() (AI-specific wrapper) to:
+	•	Send messages (sendToAiConsole)
+	•	Receive messages (feedFromAiConsole)
+	•	Track binding status (boundAiTabId, isBoundToAiConsole, canSendToAiConsole)
+	•	Displays the current binding state (which console tab it’s linked to).
+	•	Shows a list of received messages in real time.
+	•	Provides a button to send messages from the page → console.
+
+💬 In short:
+It’s the simplest example of a console-aware page — proving that any page can instantly communicate with the console through a single hook.
+
+⸻
+
+# 🧩 7️⃣ app/(protected)/tests/console-bus-test/console_ai_view.tsx
+
+🧠 Role:
+The console-side twin of your test page — a minimal AI tab view that listens to messages from its bound page and can send messages back.
+
+📦 Think of it as:
+A live terminal for the AI console tab — it receives all page→console envelopes, displays them, and lets you respond.
+
+🛠️ What it does:
+	•	Uses useConsoleBusChannel("ai") to:
+	•	Listen for all incoming envelopes from the linked page.
+	•	Send responses back to the page (sendToPage).
+	•	Keep a per-tab, in-memory feed (via CONSOLE_FEED) that persists when switching tabs.
+	•	Displays the feed of incoming messages for the active tab.
+	•	Includes simple test buttons to send messages (chat.user, chat.assistant, ui.prefill).
+
+💬 In short:
+It’s the AI tab’s frontend logic — the console-side equivalent of your console-aware page.
+Every page can have its own specialized console_ai_view.tsx next to it, giving you full control of how that page’s AI tab looks and behaves.
 
