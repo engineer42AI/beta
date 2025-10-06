@@ -24,6 +24,9 @@ export default function AIPanel() {
   const listRef   = useRef<HTMLDivElement | null>(null);
   const inputRef  = useRef<HTMLDivElement | null>(null);
 
+  // track last processed event timestamp per tab to avoid duplicates on tab switch
+  const lastHandledByTab = useRef<Record<string, number>>({});
+
   // measure input height -> CSS var (--ai-input-h)
   useEffect(() => {
     const root = rootRef.current;
@@ -34,7 +37,6 @@ export default function AIPanel() {
       root.style.setProperty("--ai-input-h", `${h}px`);
     });
     ro.observe(bar);
-    // set once immediately
     const h = Math.ceil(bar.getBoundingClientRect().height);
     root.style.setProperty("--ai-input-h", `${h}px`);
     return () => ro.disconnect();
@@ -51,6 +53,11 @@ export default function AIPanel() {
   useEffect(() => {
     if (!activeTabId || !lastConsoleEvent) return;
     if (lastConsoleEvent.tabId !== activeTabId) return;
+
+    // ⬇️ de-dupe on timestamp per tab
+    const prevTs = lastHandledByTab.current[activeTabId] ?? 0;
+    if (lastConsoleEvent.ts <= prevTs) return;
+    lastHandledByTab.current[activeTabId] = lastConsoleEvent.ts;
 
     const { type, payload } = lastConsoleEvent;
 
@@ -77,21 +84,16 @@ export default function AIPanel() {
     const q = (draft || "").trim();
     if (!q) return;
 
-    // append to chat
     appendUser(activeTabId, q);
-    // MVP echo
     appendAssistant(activeTabId, "(MVP echo) " + q);
-    // clear input
     setDraft(activeTabId, "");
 
-    // notify page bound to this tab
     const binding = getBinding(activeTabId);
     if (binding) {
       sendToPage(activeTabId, { text: q });
     }
   };
 
-  // read manifest bits for tiny header
   const binding = activeTabId ? getBinding(activeTabId) : undefined;
 
   return (
@@ -112,7 +114,7 @@ export default function AIPanel() {
         ref={listRef}
         className="absolute left-3 right-3 rounded border overflow-auto p-2"
         style={{
-          top: "28px", // below the tiny header
+          top: "28px",
           bottom: `calc(var(--ai-input-h) + 12px + env(safe-area-inset-bottom, 0px))`,
           scrollbarGutter: "stable",
         }}
@@ -137,7 +139,7 @@ export default function AIPanel() {
         </div>
       </div>
 
-      {/* Input bar (measured) */}
+      {/* Input bar */}
       <div
         ref={inputRef}
         className="absolute left-3 right-3 bottom-3 flex gap-2"

@@ -3,7 +3,15 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { logAction, logSystem, logWarn, logError } from "@/lib/logger";
+import { logAction, logSystem, logWarn } from "@/lib/logger";
+import {
+  planNewTabBinding,
+  ensureLinked as linkerEnsureLinked,
+  findTabsByRoute as linkerFindTabsByRoute,
+  validateBindings as linkerValidateBindings,
+  removeBinding as linkerRemoveBinding,
+  type AIBindings,
+} from "@/lib/consoleLinker";
 
 /* ===================== Types ===================== */
 
@@ -25,8 +33,6 @@ export type TabManifest = {
   // page-local config/state
   cs25?: { selectedTraceIds?: string[]; lastQuery?: string };
   session?: { threadId?: string; runId?: string; checkpointId?: string };
-
-  /** Optional workflow correlation id for grouped logs */
   flowId?: string;
 };
 
@@ -57,7 +63,7 @@ type ConsoleState = {
   aiDrafts: Record<string, string>;
 
   /* ----- Tab <-> Page binding + manifest (PERSISTED) ----- */
-  aiBindings: Record<string, { route: string; pageId: string; manifest?: TabManifest }>;
+  aiBindings: AIBindings;
   bindTabToCurrentPage: (tabId: string, route: string) => void;
   rebindTabToPage: (tabId: string, newPageId: string) => void;
 
@@ -109,37 +115,12 @@ const makeId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
-/* ===================== Validator (exported) ===================== */
-
+/* ===================== Validator (exported wrapper) ===================== */
 export function validateConsoleBindings(s: ConsoleState) {
-  const issues: string[] = [];
-  const aiTabIds = new Set(s.tabs.ai.map((t) => t.id));
-  const seenByRoute = new Map<string, Set<string>>();
-
-  for (const [tabId, b] of Object.entries(s.aiBindings)) {
-    if (!aiTabIds.has(tabId)) issues.push(`Binding points to a missing tab (tabId=${tabId}, route=${b.route}).`);
-    const set = seenByRoute.get(b.route) ?? new Set<string>();
-    set.add(b.pageId);
-    seenByRoute.set(b.route, set);
-  }
-
-  for (const t of s.tabs.ai) {
-    if (!s.aiBindings[t.id]) issues.push(`AI tab "${t.title}" (tabId=${t.id}) has no binding.`);
-  }
-
-  try {
-    const currentRoute = typeof window !== "undefined" ? window.location.pathname : null;
-    const active = s.activeTabId.ai ? s.aiBindings[s.activeTabId.ai] : undefined;
-    if (currentRoute && active && active.route !== currentRoute) {
-      issues.push(
-        `Active AI tab is bound to a different page (tab route="${active.route}" vs current route="${currentRoute}").`
-      );
-    }
-  } catch {
-    /* ignore */
-  }
-
-  return { ok: issues.length === 0, issues };
+  return linkerValidateBindings(
+    { tabs: { ai: s.tabs.ai }, aiBindings: s.aiBindings, activeTabId: s.activeTabId },
+    undefined
+  );
 }
 
 /* ===================== Store ===================== */
@@ -157,14 +138,14 @@ export const useConsoleStore = create<ConsoleState>()(
 
       /* ----- Context (page title used for default AI tab names) ----- */
       contextTitle: "Chat",
-      setContext: (title) => {
-        // No log here — not needed for manifest or bus validation.
-        set({ contextTitle: title ?? "Chat" });
-      },
+      setContext: (title) => set({ contextTitle: title ?? "Chat" }),
 
       /* ----- Page instance (currently visible page) ----- */
       currentPageId: undefined,
-      setCurrentPageId: (id) => set(() => ({ currentPageId: id })),
+      setCurrentPageId: (id) => {
+        // Just record it. Do NOT auto-create or auto-link tabs.
+        set({ currentPageId: id });
+      },
 
       /* ----- Chat (ephemeral) ----- */
       aiMessages: { "chat-1": [] },
@@ -176,7 +157,6 @@ export const useConsoleStore = create<ConsoleState>()(
       bindTabToCurrentPage: (tabId, route) => {
         const pid = get().currentPageId;
         if (!pid) {
-          // We tried to bind but there is no active page — this is useful warning.
           logWarn(
             "bind:missing-page",
             { tabId, route },
@@ -185,34 +165,16 @@ export const useConsoleStore = create<ConsoleState>()(
           );
           return;
         }
-        set((s) => ({
-          aiBindings: {
-            ...s.aiBindings,
-            [tabId]: {
-              route,
-              pageId: pid,
-              manifest: {
-                tabId,
-                route,
-                pageId: pid,
-                title: s.tabs.ai.find((t) => t.id === tabId)?.title ?? "Chat",
-              },
-            },
-          },
-        }));
-        // Clear, single line: tab <-> page contract created.
-        logSystem(
-          "bind:created",
-          { tabId, route, pageId: pid },
-          "console/bind",
-          "Linked this tab to the active page"
-        );
+        set((s) => {
+          const { next } = linkerEnsureLinked(s.aiBindings, tabId, route, pid); // linker logs the change
+          return { aiBindings: next };
+        });
       },
 
       rebindTabToPage: (tabId, newPageId) =>
         set((s) => {
-          const b = s.aiBindings[tabId];
-          if (!b) {
+          const current = s.aiBindings[tabId];
+          if (!current) {
             logWarn(
               "rebind:no-binding",
               { tabId, newPageId },
@@ -221,19 +183,8 @@ export const useConsoleStore = create<ConsoleState>()(
             );
             return s;
           }
-          const nextManifest: TabManifest = {
-            ...(b.manifest ?? { tabId, route: b.route, pageId: newPageId }),
-            pageId: newPageId,
-          };
-          logSystem(
-            "bind:updated",
-            { tabId, route: b.route, from: b.pageId, to: newPageId },
-            "console/bind",
-            "Updated which page this tab is linked to"
-          );
-          return {
-            aiBindings: { ...s.aiBindings, [tabId]: { ...b, pageId: newPageId, manifest: nextManifest } },
-          };
+          const { next } = linkerEnsureLinked(s.aiBindings, tabId, current.route, newPageId); // linker logs
+          return { aiBindings: next };
         }),
 
       getBinding: (tabId) => get().aiBindings[tabId],
@@ -250,142 +201,81 @@ export const useConsoleStore = create<ConsoleState>()(
             ...patch,
             tabId,
           };
-          // Log only that the manifest was saved (no spammy diffs).
-          logSystem(
-            "manifest:saved",
-            { tabId },
-            "console/manifest",
-            "Saved this tab’s configuration"
-          );
-          return { aiBindings: { ...s.aiBindings, [tabId]: { ...b, manifest: merged } } };
+          const aiBindings = { ...s.aiBindings, [tabId]: { ...b, manifest: merged } };
+          logSystem("manifest:saved", { tabId }, "console/manifest", "Saved this tab’s configuration");
+          return { aiBindings };
         }),
 
-      findTabsByRoute: (route) => {
-        const { aiBindings } = get();
-        return Object.entries(aiBindings)
-          .filter(([, b]) => b.route === route)
-          .map(([tid]) => tid);
-      },
+      findTabsByRoute: (route) => linkerFindTabsByRoute(get().aiBindings, route),
 
-      /* ----- Buses (only what's needed to prove delivery) ----- */
+      /* ----- Buses (proof of delivery only) ----- */
       lastMessage: undefined,
       sendToPage: (tabId, payload) => {
         const flowId = payload?.__flowId ?? get().aiBindings[tabId]?.manifest?.flowId;
         set({ lastMessage: { tabId, type: "ai_message", payload, ts: Date.now() } });
-        logSystem(
-          "bus:to-page",
-          { tabId, hasPayload: payload != null, flowId },
-          "console/bus",
-          "Sent a message from console to page"
-        );
+        logSystem("bus:to-page", { tabId, hasPayload: payload != null, flowId }, "console/bus", "Sent a message from console to page");
       },
 
       lastConsoleEvent: undefined,
       sendToConsole: (tabId, type, payload) => {
         const flowId = payload?.__flowId ?? get().aiBindings[tabId]?.manifest?.flowId;
         set({ lastConsoleEvent: { tabId, type, payload, ts: Date.now() } });
-        logSystem(
-          "bus:to-console",
-          { tabId, type, hasPayload: payload != null, flowId },
-          "console/bus",
-          "Received a message from page to console"
-        );
+        logSystem("bus:to-console", { tabId, type, hasPayload: payload != null, flowId }, "console/bus", "Received a message from page to console");
       },
 
-      /* ----- Chat actions (per-tab, ephemeral) ----- */
+      /* ----- Chat actions ----- */
       setDraft: (tabId, value) => set((s) => ({ aiDrafts: { ...s.aiDrafts, [tabId]: value } })),
       appendUser: (tabId, text) =>
-        set((s) => ({
-          aiMessages: {
-            ...s.aiMessages,
-            [tabId]: [...(s.aiMessages[tabId] ?? []), { role: "user", text }],
-          },
-        })),
+        set((s) => ({ aiMessages: { ...s.aiMessages, [tabId]: [...(s.aiMessages[tabId] ?? []), { role: "user", text }] } })),
       appendAssistant: (tabId, text) =>
-        set((s) => ({
-          aiMessages: {
-            ...s.aiMessages,
-            [tabId]: [...(s.aiMessages[tabId] ?? []), { role: "assistant", text }],
-          },
-        })),
+        set((s) => ({ aiMessages: { ...s.aiMessages, [tabId]: [...(s.aiMessages[tabId] ?? []), { role: "assistant", text }] } })),
       resetChat: (tabId) =>
-        set((s) => ({
-          aiMessages: { ...s.aiMessages, [tabId]: [] },
-          aiDrafts: { ...s.aiDrafts, [tabId]: "" },
-        })),
+        set((s) => ({ aiMessages: { ...s.aiMessages, [tabId]: [] }, aiDrafts: { ...s.aiDrafts, [tabId]: "" } })),
 
       /* ----- Chrome actions ----- */
       toggle: () => set((s) => ({ open: !s.open })),
       setConsoleSize: (n) => set({ consoleSize: clamp(n) }),
       toggleRail: () => set((s) => ({ railCollapsed: !s.railCollapsed })),
 
-      openTool: (tool) => {
-        set({ activeTool: tool, open: true });
-        // No log: generic clicks are noise for our validation goals.
-      },
+      openTool: (tool) => set({ activeTool: tool, open: true }),
 
       newTab: (tool, title, routeHint) => {
-        // One atomic update so title/binding are aligned
         set((s) => {
           const id = `${tool}-${Math.random().toString(36).slice(2, 8)}`;
-          const base =
-            title ?? (tool === "ai" ? s.contextTitle ?? "Chat" : `New ${tool}`);
+          const base = title ?? (tool === "ai" ? s.contextTitle ?? "Chat" : `New ${tool}`);
           const tabs = { ...s.tabs, [tool]: [...s.tabs[tool], { id, tool, title: base }] };
           const activeTabId = { ...s.activeTabId, [tool]: id };
-          const extra =
+          const extras =
             tool === "ai"
               ? { aiMessages: { ...s.aiMessages, [id]: [] }, aiDrafts: { ...s.aiDrafts, [id]: "" } }
               : {};
 
           if (tool !== "ai") {
-            // No log: non-AI tabs don't participate in manifest flow.
-            return { tabs, activeTabId, activeTool: tool, open: true, ...extra };
+            logAction("tab:new", { tabId: id, tool, title: base }, "console/tab", `User: created a new ${tool} tab "${base}"`);
+            return { tabs, activeTabId, activeTool: tool, open: true, ...extras };
           }
 
-          const route =
-            routeHint ??
-            (typeof window !== "undefined" ? window.location.pathname : "/");
+          const route = routeHint ?? (typeof window !== "undefined" ? window.location.pathname : "/");
+          const { pageId } = planNewTabBinding({ route, currentPageId: get().currentPageId, existing: s.aiBindings, makeId });
 
-          // Ensure unique pageId across all bindings
-          const used = new Set(Object.values(s.aiBindings).map((b) => b.pageId));
-          let pageId = makeId();
-          while (used.has(pageId)) pageId = makeId();
-
-          // Group this creation workflow
+          // Let the linker create the binding (and log it). Then add manifest bits.
+          const { next } = linkerEnsureLinked(s.aiBindings, id, route, pageId);
           const flowId = makeId();
-
-          const aiBindings = {
-            ...s.aiBindings,
-            [id]: {
-              route,
-              pageId,
-              manifest: { tabId: id, route, pageId, title: base, flowId },
-            },
+          next[id] = {
+            ...next[id],
+            manifest: { ...(next[id].manifest ?? { tabId: id, route, pageId }), title: base, flowId },
           };
 
-          // Minimal, clear, grouped workflow (step 1/2 + step 2/2)
-          logAction(
-            "flow:create-ai-tab:step1",
-            { flowId, tabId: id, title: base, route },
-            "console/tab",
-            `User: created a new AI tab "${base}"`
-          );
-          logSystem(
-            "flow:create-ai-tab:step2",
-            { flowId, tabId: id, route, pageId },
-            "console/bind",
-            "System: linked this tab to a new page"
-          );
+          logAction("flow:create-ai-tab:step1", { flowId, tabId: id, title: base, route }, "console/tab", `User: created a new AI tab "${base}"`);
 
-          return { tabs, activeTabId, activeTool: tool, open: true, ...extra, aiBindings };
+          return { tabs, activeTabId, activeTool: tool, open: true, ...extras, aiBindings: next };
         });
       },
 
       closeTab: (tool, tabId) =>
         set((s) => {
           const remaining = s.tabs[tool].filter((t) => t.id !== tabId);
-          const nextActive =
-            s.activeTabId[tool] === tabId ? remaining[0]?.id ?? null : s.activeTabId[tool];
+          const nextActive = s.activeTabId[tool] === tabId ? remaining[0]?.id ?? null : s.activeTabId[tool];
 
           const base: any = {
             tabs: { ...s.tabs, [tool]: remaining },
@@ -393,39 +283,26 @@ export const useConsoleStore = create<ConsoleState>()(
           };
 
           if (tool === "ai") {
-            const binding = s.aiBindings[tabId];
-            const flowId = binding?.manifest?.flowId;
+            const flowId = s.aiBindings[tabId]?.manifest?.flowId;
 
             const { [tabId]: _m, ...restMsgs } = s.aiMessages;
             const { [tabId]: _d, ...restDrafts } = s.aiDrafts;
-            const { [tabId]: _b, ...restBind } = s.aiBindings;
+
+            // Remove the binding cleanly (linker logs inside)
+            const { next: restBind } = linkerRemoveBinding(s.aiBindings, tabId);
 
             base.aiMessages = restMsgs;
             base.aiDrafts = restDrafts;
             base.aiBindings = restBind;
 
-            // Grouped close workflow
-            logAction(
-              "flow:close-ai-tab:step1",
-              { flowId, tabId },
-              "console/tab",
-              "User: closed an AI tab"
-            );
-            logSystem(
-              "flow:close-ai-tab:step2",
-              { flowId, tabId },
-              "console/bind",
-              "System: removed the tab ↔ page link"
-            );
+            logAction("flow:close-ai-tab:step1", { flowId, tabId }, "console/tab", "User: closed an AI tab");
           }
 
           return base;
         }),
 
-      setActiveTab: (tool, tabId) => {
-        set((s) => ({ activeTool: tool, activeTabId: { ...s.activeTabId, [tool]: tabId } }));
-        // No log: switching tabs is frequent and not required for validation.
-      },
+      setActiveTab: (tool, tabId) =>
+        set((s) => ({ activeTool: tool, activeTabId: { ...s.activeTabId, [tool]: tabId } })),
     }),
     {
       name: "console-v1",
@@ -436,30 +313,15 @@ export const useConsoleStore = create<ConsoleState>()(
         if (fromVersion < 2) {
           s.currentPageId = s.currentPageId ?? undefined;
           s.aiBindings = s.aiBindings ?? {};
-
           const tb = s.tabs ?? {};
-          s.tabs = {
-            logs: tb.logs ?? [],
-            ai: tb.ai ?? [],
-            traces: tb.traces ?? [],
-            tasks: tb.tasks ?? [],
-          };
-
+          s.tabs = { logs: tb.logs ?? [], ai: tb.ai ?? [], traces: tb.traces ?? [], tasks: tb.tasks ?? [] };
           const ati = s.activeTabId ?? {};
-          s.activeTabId = {
-            logs: ati.logs ?? null,
-            ai: ati.ai ?? null,
-            traces: ati.traces ?? null,
-            tasks: ati.tasks ?? null,
-          };
-
+          s.activeTabId = { logs: ati.logs ?? null, ai: ati.ai ?? null, traces: ati.traces ?? null, tasks: ati.tasks ?? null };
           s.contextTitle = s.contextTitle ?? "Chat";
           s.open = s.open ?? true;
           s.consoleSize = typeof s.consoleSize === "number" ? s.consoleSize : 35;
           s.railCollapsed = !!s.railCollapsed;
-          s.activeTool = (["logs", "ai", "traces", "tasks"] as ToolId[]).includes(s.activeTool)
-            ? s.activeTool
-            : "ai";
+          s.activeTool = (["logs", "ai", "traces", "tasks"] as ToolId[]).includes(s.activeTool) ? s.activeTool : "ai";
         }
         return s as ConsoleState;
       },

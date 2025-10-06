@@ -44,7 +44,11 @@ src/
 
 # Files & roles (plain English)
 
+consoleLinker.ts owns all “contract” logic + logs (create/update/validate the tab ↔ page link, and route lookups).
+
 ## src/stores/console-store.ts
+
+console-store.ts logs user actions (create/close tabs) and delegates all link work (and link logs) to the linker.
 
 Role: The “brain” of the console.
 What it owns:
