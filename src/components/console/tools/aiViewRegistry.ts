@@ -25,3 +25,8 @@ export async function loadAiView(route: string) {
     return null;
   }
 }
+
+/* 👇 Add this helper */
+export function listRegisteredAiViewRoutes(): string[] {
+  return Object.keys(registry);
+}

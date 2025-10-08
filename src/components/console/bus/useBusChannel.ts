@@ -71,16 +71,17 @@ export function usePageBusChannel(scope: Scope) {
   const isBound                 = !!boundTabId;
   const canSend                 = !!(boundTabId || (activeScopedTabId && isActiveTabForThisRoute));
 
+  // STRICT: send only to bound tab (do not fall back)
   const send = useCallback((partial: Pick<Envelope, "topic" | "payload">) => {
-    const target = boundTabId ?? activeScopedTabId;
-    if (!target) return;
+    if (!boundTabId) return; // <-- was boundTabId ?? activeScopedTabId
     const env: Envelope = {
       v: 1, id: makeId(), ts: Date.now(),
-      scope, dir: "page→console", route, pageId, tabId: target,
+      scope, dir: "page→console",
+      route, pageId, tabId: boundTabId,
       topic: partial.topic, payload: partial.payload,
     };
-    sendRaw(target, "bus_message", env);
-  }, [activeScopedTabId, boundTabId, pageId, route, scope, sendRaw]);
+    sendRaw(boundTabId, "bus_message", env);
+  }, [boundTabId, pageId, route, scope, sendRaw]);
 
   const [feedByTab, setFeedByTab] = useState<Record<string, Envelope[]>>({});
   const seenByTab = useRef<Record<string, Set<string>>>({});
@@ -116,6 +117,18 @@ export function useConsoleBusChannel(scope: Scope, options?: { maxFeed?: number 
 
   const binding = activeAiTabId ? getBinding(activeAiTabId) : undefined;
   const isLinkedToPage = !!(binding?.route && binding?.pageId);
+
+  // queue commands until linked
+  const queueRef = useRef<Envelope[]>([]);
+
+  useEffect(() => {
+    if (!isLinkedToPage || !activeAiTabId) return;
+    const queued = queueRef.current;
+    if (queued.length) {
+      for (const env of queued) sendToPageStore(activeAiTabId, env);
+      queueRef.current = [];
+    }
+  }, [isLinkedToPage, activeAiTabId, sendToPageStore]);
 
   // Ephemeral per-tab ring buffer (module scoped)
   const FEED = CONSOLE_FEED;
@@ -158,8 +171,12 @@ export function useConsoleBusChannel(scope: Scope, options?: { maxFeed?: number 
       route: binding.route, pageId: binding.pageId, tabId: activeAiTabId,
       topic, payload,
     };
+    if (!isLinkedToPage) {
+      queueRef.current.push(env); // <-- hold until link is ready
+      return;
+    }
     sendToPageStore(activeAiTabId, env);
-  }, [activeAiTabId, binding, scope, sendToPageStore]);
+  }, [activeAiTabId, binding, scope, isLinkedToPage, sendToPageStore]);
 
   const clearFeedForCurrentTab = useCallback(() => {
     if (!activeAiTabId) return;
