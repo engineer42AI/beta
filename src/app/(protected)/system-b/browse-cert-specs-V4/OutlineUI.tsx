@@ -7,6 +7,27 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
+
+const cbCls = [
+  "h-4 w-4 shrink-0 rounded-[6px]",
+  "border border-border bg-card transition-colors",
+
+  // ✅ Softer checked color: uses accent instead of pure foreground
+  "data-[state=checked]:bg-[color-mix(in_oklab,hsl(var(--foreground))_70%,hsl(var(--background))_10%)]",
+  "data-[state=checked]:border-[color-mix(in_oklab,hsl(var(--foreground))_60%,hsl(var(--background))_20%)]",
+  "data-[state=checked]:text-background",
+
+  // ✅ Softer indeterminate state too
+  "data-[state=indeterminate]:bg-[color-mix(in_oklab,hsl(var(--foreground))_60%,hsl(var(--background))_20%)]",
+  "data-[state=indeterminate]:border-[color-mix(in_oklab,hsl(var(--foreground))_50%,hsl(var(--background))_30%)]",
+  "data-[state=indeterminate]:text-background",
+
+  "hover:border-foreground/50",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+  "focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+].join(" ");
 
 /* ---------------- Local Types (aligned with page.tsx) ---------------- */
 export type OutlineNode = {
@@ -17,6 +38,10 @@ export type OutlineNode = {
   title?: string;
   paragraph_id?: string;
   children?: OutlineNode[];
+
+  // NEW: intent(s) your backend may attach to Section
+  intent?: { uuid?: string; summary?: string; intent?: string; events?: any } | null;
+  intents?: Array<{ uuid?: string; summary?: string; intent?: string; events?: any }>;
 };
 
 export type TraceRow = {
@@ -30,6 +55,25 @@ export type TraceRow = {
 export type NodeStats = { total: number; relevant: number; notRelevant: number };
 
 /* ---------------- Pure helpers (only used inside this module) ---------------- */
+function getSectionSummary(n: OutlineNode): string | undefined {
+  // 1. Pick whichever summary is available
+  let summary =
+    (n as any).intent?.summary ||
+    (n as any).intents?.find((i: any) => i?.summary)?.summary ||
+    undefined;
+
+  if (!summary) return undefined;
+
+  // 2. Trim and remove the boilerplate phrase if present
+  summary = summary.trim();
+  const prefix = "The logic is simple:";
+  if (summary.startsWith(prefix)) {
+    summary = summary.slice(prefix.length).trimStart();
+  }
+
+  return summary;
+}
+
 const zeroStats = (): NodeStats => ({ total: 0, relevant: 0, notRelevant: 0 });
 
 function addStats(a: NodeStats, b: NodeStats): NodeStats {
@@ -86,6 +130,35 @@ function useLatestResult(row: TraceRow) {
 }
 
 /* ---------------- Tiny UI atoms ---------------- */
+function SectionSummary({ summary }: { summary?: string }) {
+  if (!summary) return null;
+  return (
+    <>
+      {/* subtle one-liner on md+ only, won’t push pills */}
+      <span className="ml-2 hidden md:inline text-[11px] text-muted-foreground italic truncate max-w-[52ch]" title={summary}>
+        — {summary}
+      </span>
+
+      {/* always-available info tooltip (icon only) */}
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              className="ml-2 inline-flex items-center rounded p-1 hover:bg-accent/40"
+              aria-label="Show section summary"
+            >
+              <Info className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs text-xs leading-5">
+            {summary}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </>
+  );
+}
+
 function StatPills({ s }: { s?: NodeStats }) {
   if (!s) return null;
   return (
@@ -103,29 +176,7 @@ function StatPills({ s }: { s?: NodeStats }) {
   );
 }
 
-function TriStateCheckbox({
-  checked,
-  indeterminate,
-  onChange,
-  className = "",
-  title,
-}: {
-  checked: boolean;
-  indeterminate?: boolean;
-  onChange: (checked: boolean) => void;
-  className?: string;
-  title?: string;
-}) {
-  const visualState: boolean | "indeterminate" = indeterminate ? "indeterminate" : checked;
-  return (
-    <Checkbox
-      title={title}
-      checked={visualState}
-      onCheckedChange={(v) => onChange(v === true)}
-      className={["h-4 w-4 shrink-0", "border-muted-foreground/50", className].join(" ")}
-    />
-  );
-}
+
 
 function RelevanceDot({ v }: { v: boolean | undefined }) {
   const cls =
@@ -166,16 +217,17 @@ function SectionTraceTableCompact({
             <div key={r.trace_uuid} className="trace-row grid grid-cols-[26px,1fr,140px,1fr,90px] items-center px-3 py-2 text-sm relative hover:bg-accent/40 transition-colors">
               <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-transparent" aria-hidden />
               <div>
-                <TriStateCheckbox
-                  checked={traceChecked}
-                  onChange={(checked) => {
+                <Checkbox
+                  checked={selectedTraces.has(r.trace_uuid)}
+                  onCheckedChange={(v) => {
+                    const next = v === true;
                     setSelectedTraces(prev => {
-                      const next = new Set(prev);
-                      if (checked) next.add(r.trace_uuid); else next.delete(r.trace_uuid);
-                      return next;
+                      const s = new Set(prev);
+                      next ? s.add(r.trace_uuid) : s.delete(r.trace_uuid);
+                      return s;
                     });
                   }}
-                  title="Select trace"
+                  className={cbCls}
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1 min-w-0">
@@ -268,16 +320,17 @@ function SubpartAccordion({
     <AccordionItem value={String(subpart.uuid)}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <TriStateCheckbox
-            checked={sel.checked}
-            indeterminate={sel.indeterminate}
-            onChange={(checked) => {
-              setSelectedTraces(prev => {
-                const next = new Set(prev);
-                for (const id of sel.ids) checked ? next.add(id) : next.delete(id);
-                return next;
-              });
-            }}
+          <Checkbox
+              checked={sel.indeterminate ? "indeterminate" : sel.checked}
+              onCheckedChange={(v) => {
+                const next = v === true;
+                setSelectedTraces(prev => {
+                  const s = new Set(prev);
+                  for (const id of sel.ids) next ? s.add(id) : s.delete(id);
+                  return s;
+                });
+              }}
+              className={cbCls}
           />
           <AccordionTrigger className="flex-1 text-left px-2 py-1 rounded hover:no-underline hover:bg-accent/40 truncate">
             {subpart.label
@@ -338,33 +391,43 @@ function SectionCollapsible({
   const s = sectionStats[section.uuid];
   const traces = sectionTraces[section.uuid] || [];
   const sel = selectionStateForNode(section, sectionTraces, selectedTraces);
+
   const headerTitle =
-    section.label
-      ?? (section.number && section.title
-            ? `${section.number} ${section.title}`
-            : section.number ?? section.title ?? "Section");
+    section.label ??
+    (section.number && section.title
+      ? `${section.number} ${section.title}`
+      : section.number ?? section.title ?? "Section");
+
+  const summary = getSectionSummary(section);
 
   return (
     <Collapsible>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <TriStateCheckbox
-            checked={sel.checked}
-            indeterminate={sel.indeterminate}
-            onChange={(checked) => {
-              setSelectedTraces(prev => {
-                const next = new Set(prev);
-                for (const id of sel.ids) checked ? next.add(id) : next.delete(id);
-                return next;
-              });
-            }}
+          {/* ✅ Use shadcn Checkbox directly */}
+          <Checkbox
+              checked={sel.indeterminate ? "indeterminate" : sel.checked}
+              onCheckedChange={(v) => {
+                const next = v === true;
+                setSelectedTraces(prev => {
+                  const s = new Set(prev);
+                  for (const id of sel.ids) next ? s.add(id) : s.delete(id);
+                  return s;
+                });
+              }}
+              className={cbCls}
           />
+
           <CollapsibleTrigger asChild>
             <button className="px-2 py-1 text-sm font-medium rounded hover:bg-accent/40 data-[state=open]:underline truncate">
               {headerTitle}
             </button>
           </CollapsibleTrigger>
+
+          {/* summary text */}
+          <SectionSummary summary={summary} />
         </div>
+
         <StatPills s={s} />
       </div>
 
@@ -409,16 +472,17 @@ function HeadingCollapsible({
     <Collapsible>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <TriStateCheckbox
-            checked={sel.checked}
-            indeterminate={sel.indeterminate}
-            onChange={(checked) => {
-              setSelectedTraces(prev => {
-                const next = new Set(prev);
-                for (const id of sel.ids) checked ? next.add(id) : next.delete(id);
-                return next;
-              });
-            }}
+          <Checkbox
+              checked={sel.indeterminate ? "indeterminate" : sel.checked}
+              onCheckedChange={(v) => {
+                const next = v === true;
+                setSelectedTraces(prev => {
+                  const s = new Set(prev);
+                  for (const id of sel.ids) next ? s.add(id) : s.delete(id);
+                  return s;
+                });
+              }}
+              className={cbCls}
           />
           <CollapsibleTrigger asChild>
             <button className="px-2 py-1 text-sm font-medium rounded hover:bg-accent/40 data-[state=open]:underline truncate">

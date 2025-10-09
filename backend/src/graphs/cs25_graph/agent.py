@@ -423,12 +423,15 @@ from .utils import ManifestGraph, GraphOps  # already imported above
 async def get_outline() -> dict:
     mg, ops = _get_runtime()
     outline, indices = ops.build_outline_for_frontend()
-    section_traces, trace_lookup = ops.build_section_traces_for_frontend()
+    # ⬅️ NEW: attach intent info to each Section in the outline
+    ops.enrich_sections_with_intents(outline, indices["uuid_to_node"])
+
+    section_traces, _trace_lookup = ops.build_section_traces_for_frontend()
 
     return {
         "outline": outline,
-        "indices": indices,
+        # "indices": indices,
         "section_traces": section_traces,
         # { <section_uuid>: [ {trace_uuid, bottom_uuid, bottom_paragraph_id, path_labels, results: []}, ... ] }
-        "trace_lookup": trace_lookup,  # { <trace_uuid>: { section_uuid, index, bottom_uuid } }
+        # "trace_lookup": trace_lookup,  # { <trace_uuid>: { section_uuid, index, bottom_uuid } }
     }

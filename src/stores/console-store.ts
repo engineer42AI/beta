@@ -352,42 +352,43 @@ export const useConsoleStore = create<ConsoleState>()(
         }),
 
       closeAllTabs: (tool) =>
-        set((s) => {
-          const ids = (s.tabs[tool] ?? []).map((t) => t.id);
-          const tabs = { ...s.tabs, [tool]: [] };
-          const activeTabId = { ...s.activeTabId, [tool]: null };
+          set((s) => {
+            const ids = (s.tabs[tool] ?? []).map((t) => t.id);
+            const tabs = { ...s.tabs, [tool]: [] };
+            const activeTabId = { ...s.activeTabId, [tool]: null };
 
-          if (tool !== "ai") {
-            return { tabs, activeTabId };
-          }
+            if (tool !== "ai") {
+              return { tabs, activeTabId };
+            }
 
-          let aiBindings = { ...(s.aiBindings ?? {}) };
-          const aiMessages = { ...(s.aiMessages ?? {}) };
-          const aiDrafts = { ...(s.aiDrafts ?? {}) };
-          const flows = { ...(s.flows ?? {}) };
+            let aiBindings = { ...(s.aiBindings ?? {}) };
+            const aiMessages = { ...(s.aiMessages ?? {}) };
+            const aiDrafts = { ...(s.aiDrafts ?? {}) };
+            const flows = { ...(s.flows ?? {}) };
 
-          for (const tabId of ids) {
+            for (const tabId of ids) {
+              // ✅ get route from the current aiBindings snapshot (before removal)
+              const route = aiBindings?.[tabId]?.route as string | undefined;
 
-            const route = binding?.route;
-            try {
-              if (route) {
-                usePageConfigStore.getState().clearConfig(route, tabId);
-              } else {
-                // if ever missing, nuke any routes for this tabId as a fallback
-                usePageConfigStore.getState().clearByTabId?.(tabId);
-              }
-            } catch {}
+              try {
+                if (route) {
+                  usePageConfigStore.getState().clearConfig(route, tabId);
+                } else {
+                  usePageConfigStore.getState().clearByTabId?.(tabId);
+                }
+              } catch {}
 
-            const { next } = linkerRemoveBinding(aiBindings, tabId);
-            aiBindings = next;
+              // remove the binding last
+              const { next } = linkerRemoveBinding(aiBindings, tabId);
+              aiBindings = next;
 
-            delete aiMessages[tabId];
-            delete aiDrafts[tabId];
-            delete flows[tabId];
-          }
+              delete aiMessages[tabId];
+              delete aiDrafts[tabId];
+              delete flows[tabId];
+            }
 
-          return { tabs, activeTabId, aiBindings, aiMessages, aiDrafts, flows };
-        }),
+            return { tabs, activeTabId, aiBindings, aiMessages, aiDrafts, flows };
+          }),
 
       setActiveTab: (tool, tabId) =>
         set((s) => ({ activeTool: tool, activeTabId: { ...s.activeTabId, [tool]: tabId } })),

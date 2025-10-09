@@ -1287,3 +1287,52 @@ class GraphOps:
         new_section_traces = dict(section_traces)
         new_section_traces[sid] = new_rows
         return new_section_traces
+
+    def enrich_sections_with_intents(
+            self,
+            outline_root: dict,
+            uuid_to_node: dict[str, dict],
+    ) -> None:
+        """
+        For every 'Section' node in the OUTLINE, follow HAS_INTENT edges in the graph
+        to 'Intent' nodes and attach their key fields to the outline node.
+
+        Outline Section node after enrichment will have either:
+          - node["intent"] = { summary, intent, events, uuid? }  (single)
+          - node["intents"] = [ { ... }, ... ]                   (multiple)
+        """
+        G = self.G
+        if G is None or len(G) == 0:
+            return
+
+        for sec_uuid, out_node in uuid_to_node.items():
+            if out_node.get("type") != "Section":
+                continue
+            if not G.has_node(sec_uuid):
+                continue
+
+            intents = []
+            # outgoing edges from Section
+            for _, v, ed in G.out_edges(sec_uuid, data=True):
+                if ed.get("relation") != "HAS_INTENT":
+                    continue
+                nd = G.nodes.get(v, {})
+                if nd.get("ntype") != "Intent":
+                    continue
+
+                # extract safe, JSON-serializable fields
+                intents.append({
+                    "uuid": v,
+                    "summary": nd.get("summary"),
+                    "intent": nd.get("intent"),
+                    "events": nd.get("events"),
+                })
+
+            if not intents:
+                continue
+
+            # attach (prefer single object when only one)
+            if len(intents) == 1:
+                out_node["intent"] = intents[0]
+            else:
+                out_node["intents"] = intents
