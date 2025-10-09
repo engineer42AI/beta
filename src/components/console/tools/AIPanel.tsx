@@ -8,6 +8,7 @@ import { hasAiView, loadAiView } from "./aiViewRegistry";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default function AIPanel() {
   const pathname        = usePathname() || "/";
@@ -57,8 +58,14 @@ export default function AIPanel() {
 
   return (
     <div className="relative h-full min-h-0">
+
       {/* Underlay: keep mounted so state persists; blur ONLY when the debounced overlay is shown */}
-      <div className={showOverlay ? "pointer-events-none select-none blur-lg" : ""}>
+      <div
+        className={cn(
+          "absolute inset-0 overflow-auto [scrollbar-gutter:stable]",
+          showOverlay && "pointer-events-none select-none blur-[2px]"
+        )}
+      >
         {View ? (
           <View key={activeTabId ?? "no-tab"} />
         ) : (
@@ -68,6 +75,7 @@ export default function AIPanel() {
             onOpenFresh={openFreshForCurrentPage}
           />
         )}
+
       </div>
 
       {/* Minimal centered overlay, shown only after the grace window */}

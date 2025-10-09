@@ -1,190 +1,133 @@
-// src/app/(protected)/system-b/browse-cert-specs-v4/console_ai_view.tsx
+// src/app/(protected)/system-b/browse-cert-specs-V4/console_ai_view.tsx
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useConsoleBusChannel } from "@/components/console/bus/useBusChannel";
+import { useEffect, useMemo, useState } from "react";
+import { orchestrator, type OrchestratorState, type WireEntry } from "@/lib/pageOrchestrator";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Inspector } from "react-inspector";
 
-/* ====================== Types ====================== */
-type Status = { running: boolean; total: number; done: number; cost: number };
-const initialStatus: Status = { running: false, total: 0, done: 0, cost: 0 };
-
-/* ====================== Per-tab sticky cache ====================== */
-/** Persists last known status per AI tab so state survives tab switches. */
-const LAST_STATUS = new Map<string, Status>();
-
-/* ====================== UI bits ====================== */
-function StatusInline({ s }: { s: Status }) {
-  const pct = s.total > 0 ? Math.min(100, Math.round((s.done / s.total) * 100)) : 0;
-  return (
-    <div className="flex items-center gap-3 rounded-lg border bg-accent/20 px-3 py-2">
-      <div className="w-48">
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-          <span>{s.running ? "Processing…" : "Idle"}</span>
-          <span className="tabular-nums">{pct}%</span>
-        </div>
-        <Progress value={pct} className="h-2" />
-        <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-          {s.done}/{s.total} traces
-        </div>
-      </div>
-      <div className="ml-1 flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">Cost</span>
-        <span className="font-mono tabular-nums px-2 py-[2px] rounded border bg-background">
-          {s.cost.toFixed(6)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/* ====================== Console AI View ====================== */
 export default function ConsoleAiView() {
-  const { activeAiTabId, binding, isLinkedToPage, feedFromPage, sendToPage } =
-    useConsoleBusChannel("ai");
+  // live orchestrator state + wire feed
+  const [state, setState] = useState<OrchestratorState>(orchestrator.getState?.() ?? {});
+  const [wire, setWire] = useState<WireEntry[]>([]);
 
-  // ---- query input (console-originated) ----
-  const [query, setQuery] = useState(
-    "Are there CS-25 rules relevant to approaches below 200 ft decision height, and why?"
+  useEffect(() => orchestrator.subscribe?.(setState), []);
+  useEffect(() => orchestrator.subscribeWire?.(setWire), []);
+
+  // Only show messages the orchestrator addressed to the console (e.g., state:emit).
+  const rows = useMemo(
+    () =>
+      [...wire]
+        .filter((e) => e.to === "console")
+        .sort((a, b) => b.ts - a.ts), // newest first
+    [wire]
   );
 
-  // ---- status with sticky per-tab cache ----
-  const [status, _setStatus] = useState<Status>(initialStatus);
-  const setStatus = useCallback(
-    (next: Status) => {
-      _setStatus(next);
-      if (activeAiTabId) LAST_STATUS.set(activeAiTabId, next);
-    },
-    [activeAiTabId]
-  );
-
-  // seed from cache whenever tab changes
-  useEffect(() => {
-    if (activeAiTabId) {
-      const cached = LAST_STATUS.get(activeAiTabId) ?? initialStatus;
-      _setStatus(cached);
-    } else {
-      _setStatus(initialStatus);
-    }
-  }, [activeAiTabId]);
-
-  // ---- optimistic "running" timer (cleared on real status) ----
-  const optimismTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearOptimism = () => {
-    if (optimismTimer.current) {
-      clearTimeout(optimismTimer.current);
-      optimismTimer.current = null;
-    }
-  };
-  useEffect(() => () => clearOptimism(), []);
-
-  // ---- consume page → console status messages (authoritative) ----
-  useEffect(() => {
-    if (!feedFromPage.length) return;
-    const last = feedFromPage[feedFromPage.length - 1];
-    if (last.topic !== "cs25.status") return;
-
-    const p = last.payload || {};
-    setStatus({
-      running: !!p.running,
-      total: typeof p.total === "number" ? p.total : status.total,
-      done: typeof p.done === "number" ? p.done : status.done,
-      cost: typeof p.cost === "number" ? p.cost : status.cost,
-    });
-
-    // got real data → cancel optimism timeout
-    clearOptimism();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedFromPage.length]); // process each new message once
-
-  // ---- commands to page ----
-  const run = useCallback(() => {
-    if (!isLinkedToPage) return;
-
-    // optimistic flip to "running"
-    setStatus({ running: true, total: status.total || 0, done: status.done || 0, cost: status.cost || 0 });
-
-    // send command
-    sendToPage("cs25.run.start", { query });
-
-    // safety: if page never acks within 2s, relax to idle
-    clearOptimism();
-    optimismTimer.current = setTimeout(() => {
-      setStatus(prev => (prev.running ? { ...prev, running: false } : prev));
-      optimismTimer.current = null;
-    }, 2000);
-  }, [isLinkedToPage, query, sendToPage, setStatus, status.total, status.done, status.cost]);
-
-  const stop = useCallback(() => {
-    if (!isLinkedToPage) return;
-    sendToPage("cs25.run.stop");
-    // let page confirm via status; no local flip here to avoid desync
-  }, [isLinkedToPage, sendToPage]);
-
-  const reset = useCallback(() => {
-    if (!isLinkedToPage) return;
-    // local clear + cache clear now
-    setStatus(initialStatus);
-    sendToPage("cs25.reset");
-  }, [isLinkedToPage, setStatus, sendToPage]);
-
-  const disabled = !isLinkedToPage;
+  const binding = state.binding;
+  const status = state.status ?? "idle";
 
   return (
-    <div className="h-full flex flex-col gap-3 p-3">
-      <div className="text-[11px] text-muted-foreground">
-        tab: <code>{activeAiTabId ?? "—"}</code> · page:{" "}
-        <code>{binding?.pageId?.slice(0, 8) ?? "—"}</code> · route:{" "}
-        <code>{binding?.route ?? "—"}</code>
-      </div>
-
-      <Card className="p-3 space-y-3">
-        <label className="block text-sm font-medium">User query</label>
-        <Textarea
-          className="w-full min-h-[100px]"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Ask about CS-25…"
-          disabled={disabled}
-        />
-
-        <div className="flex gap-3 items-center">
-          <Button onClick={run} disabled={!isLinkedToPage || status.running}>
-              {status.running ? "Streaming…" : "Run"}
-          </Button>
-          {status.running && (
-            <Button variant="outline" onClick={stop} disabled={disabled} className="px-4">
-              Stop
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            onClick={reset}
-            disabled={disabled || status.running}
-            className="px-3"
-            title="Reset all results and selections"
-          >
-            Reset
-          </Button>
-          <span className="text-xs text-muted-foreground ml-2">
-              Selected: <span className="font-mono tabular-nums">{status.total}</span>
-          </span>
-          <div className="ml-auto">
-            <StatusInline s={status} />
+    <div className="flex flex-col gap-3 p-3 text-sm">
+      {/* Context card */}
+      <Card className="p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-xs text-muted-foreground">
+            route <span className="font-mono ml-1">{binding?.route ?? "—"}</span>
+          </div>
+          <Separator orientation="vertical" className="h-4" />
+          <div className="text-xs text-muted-foreground">
+            page <span className="font-mono ml-1">{binding?.pageId?.slice(0, 8) ?? "—"}</span>
+          </div>
+          <Separator orientation="vertical" className="h-4" />
+          <div className="text-xs text-muted-foreground">
+            tab <span className="font-mono ml-1">{binding?.tabId ?? "—"}</span>
           </div>
 
-
+          <div className="ml-auto flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className="text-[11px]"
+            >
+              status: <span className="ml-1 font-mono">{status}</span>
+            </Badge>
+            {state.lastError && (
+              <Badge className="text-[11px] bg-red-600 text-white">
+                error: <span className="ml-1">{state.lastError}</span>
+              </Badge>
+            )}
+          </div>
         </div>
       </Card>
 
-      {!isLinkedToPage && (
-        <div className="text-xs text-muted-foreground">
-          This tab isn’t linked to the current page yet. Open a fresh AI tab for this route from the overlay.
+      {/* Wire feed to console */}
+      <Card className="p-0 flex-1 min-h-0">
+        <div className="px-3 py-2 border-b bg-muted/40 text-[11px] text-muted-foreground">
+          Orchestrator → Console (newest first)
         </div>
-      )}
+
+        <div className="min-h-0">
+          {rows.length === 0 && (
+            <div className="px-3 py-6 text-xs text-muted-foreground">No console-directed events yet.</div>
+          )}
+
+          {rows.map((e) => (
+            <details key={e.id} className="border-b open:bg-muted/10">
+              <summary className="list-none px-3 py-2 grid grid-cols-[120px_1fr_200px] gap-3 items-center cursor-pointer">
+                <div className="font-mono tabular-nums text-[11px] text-muted-foreground">
+                  {new Date(e.ts).toLocaleTimeString(undefined, { hour12: false })}
+                </div>
+
+                <div className="min-w-0 flex items-center gap-2">
+                  <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                    {e.channel}
+                  </Badge>
+                  <span className="truncate">{e.label ?? "—"}</span>
+                </div>
+
+                <div className="text-[11px] text-muted-foreground justify-self-end">
+                  <span className="mr-2">
+                    from <span className="font-mono">{e.from}</span>
+                  </span>
+                  <span>
+                    to <span className="font-mono">{e.to}</span>
+                  </span>
+                </div>
+              </summary>
+
+              {/* payload inspector */}
+              <div className="px-3 pb-3">
+                <div className="rounded-md border bg-background">
+                  <div className="px-2 py-1.5 border-b text-xs text-muted-foreground">Payload</div>
+                  <div className="p-2 overflow-auto">
+                    <Inspector
+                      theme="chromeLight"
+                      table={false}
+                      expandLevel={1}
+                      sortObjectKeys
+                      data={e.payload ?? {}}
+                    />
+                  </div>
+                </div>
+
+                {/* footer context */}
+                <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                  <span>
+                    route <span className="font-mono">{e.route ?? "—"}</span>
+                  </span>
+                  <span>
+                    page <span className="font-mono">{e.pageId?.slice(0, 8) ?? "—"}</span>
+                  </span>
+                  <span>
+                    tab <span className="font-mono">{e.tabId ?? "—"}</span>
+                  </span>
+                </div>
+              </div>
+            </details>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

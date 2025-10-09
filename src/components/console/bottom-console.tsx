@@ -144,7 +144,7 @@ export default function BottomConsole() {
             )}
 
             {/* Active tool surface */}
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 overflow-hidden">
               <ToolSurface tool={activeTool as ToolId} activeTabId={activeTabId[activeTool]} />
             </div>
           </section>
@@ -157,19 +157,19 @@ export default function BottomConsole() {
 function ToolSurface({ tool, activeTabId }: { tool: ToolId; activeTabId: string | null }) {
   useMemo(() => activeTabId ?? "No tab", [activeTabId]); // keep memoized to avoid unused var lint
 
-  if (tool === "ai") return <AIPanel />;
-
-  if (tool === "logs") {
+  if (tool === "ai") {
     return (
       <div className="h-full min-h-0">
-        <LogPanel />
+        <AIPanel />
       </div>
     );
   }
 
+  if (tool === "logs") return <LogPanel />;
+
   if (tool === "traces") {
-    return <div className="h-full p-3 text-sm text-muted-foreground">Traces panel (MVP)</div>;
+    return <div className="h-full min-h-0 overflow-auto p-3 text-sm text-muted-foreground">Traces panel (MVP)</div>;
   }
 
-  return <div className="h-full p-3 text-sm text-muted-foreground">Tasks panel (MVP)</div>;
+  return <div className="h-full min-h-0 overflow-auto p-3 text-sm text-muted-foreground">Tasks panel (MVP)</div>;
 }
