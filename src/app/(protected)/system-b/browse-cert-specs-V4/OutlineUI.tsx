@@ -279,9 +279,6 @@ export function OutlineTree({
           setSelectedTraces={setSelectedTraces}
         />
       ))}
-      {subparts.length === 0 && (
-        <div className="text-sm text-muted-foreground">Loading outline…</div>
-      )}
     </Accordion>
   );
 }

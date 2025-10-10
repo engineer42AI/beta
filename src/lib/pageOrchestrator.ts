@@ -1,8 +1,10 @@
-// src/lib/pageOrchestrator.ts
-// src/lib/orchestrator/pageOrchestrator.ts
 "use client";
 
-/** Minimal, generic page orchestrator (only: load outline) — with BLUF labels */
+/** Generic page orchestrator: routes envelopes across channels.
+ * - No assumptions about payload vs metadata.
+ * - No implicit console logs; only what callers/handlers emit.
+ * - Page-specific logic lives in page-local handlers (registered at runtime).
+ */
 
 type Unsub = () => void;
 
@@ -15,32 +17,39 @@ export type OrchestratorState = {
   meta?: Record<string, any>;
 };
 
+export type Role = "page" | "console" | "backend" | "orchestrator";
+
 export type WireEntry = {
   id: string;
   ts: number;
   route?: string;
   pageId?: string;
   tabId?: string;
-  from: "page" | "console" | "zustand" | "orchestrator" | "backend";
-  to:   "page" | "console" | "zustand" | "orchestrator" | "backend";
+  from: Role;
+  to:   Role;
   channel: string;
-  label?: string;   // BLUF-style summary of what this row means
-  payload?: any;
+  label?: string;   // BLUF-style summary
+  payload?: any;    // raw, unformatted data that is transmitted
+  metadata?: any;   // contextual info (status, timings, workflow, etc.)
 };
 
 export type Envelope = {
-  from: WireEntry["from"];
-  to:   WireEntry["to"];
+  from: Role;
+  to:   Role;
   channel: string;
   payload?: any;
+  metadata?: any;
 };
 
 type Listener<T> = (s: T) => void;
+type Handler = (env: Envelope) => void | Promise<void>;
 
 const uid = () =>
   (typeof crypto !== "undefined" && "randomUUID" in crypto)
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+export type OrchestratorPublicState = OrchestratorState;
 
 export class PageOrchestrator {
   /* ---------- state ---------- */
@@ -61,9 +70,24 @@ export class PageOrchestrator {
   /* ---------- DI ---------- */
   private deps = {
     getBinding: (): Binding | undefined => undefined,
-    onDeliver: (env: Envelope) => { /* orchestrator → page */ },
+    // Page listens to envelopes where to === "page"
+    onDeliver: (env: Envelope) => {},
   };
 
+  /* ---------- handler registry ---------- */
+  private handlers = new Map<string, Handler>();
+
+  registerHandler(channel: string, fn: Handler) {
+    this.handlers.set(channel, fn);
+  }
+  unregisterHandler(channel: string) {
+    this.handlers.delete(channel);
+  }
+  unregisterAllHandlers() {
+    this.handlers.clear();
+  }
+
+  /* ---------- configuration ---------- */
   configure(partial: Partial<typeof this.deps>) {
     this.deps = { ...this.deps, ...partial };
     const b = this.deps.getBinding?.() || {};
@@ -108,16 +132,15 @@ export class PageOrchestrator {
     for (const fn of this.wireSubs) fn(snap);
   }
 
-  /* ---------- state emit ---------- */
+  /* ---------- state emit (visible in wire) ---------- */
   private patch(p: Partial<OrchestratorState>) {
     this.state = { ...this.state, ...p };
-    // BLUF pulse for dashboards
     this.pushWire({
       from: "orchestrator",
-      to: "console",
+      to: "orchestrator",
       channel: "state:emit",
       label: `Orchestrator state → ${this.state.status}`,
-      payload: {
+      metadata: {
         status: this.state.status,
         hasBinding: !!(this.state.binding?.route && this.state.binding?.pageId),
       },
@@ -132,128 +155,111 @@ export class PageOrchestrator {
       to: "orchestrator",
       channel: "binding",
       label: "Page bound to orchestrator (route/page/tab captured)",
-      payload: binding,
+      metadata: binding,
     });
   }
 
-  /* ---------- public API ---------- */
+  /* ---------- RECEIVING (inbound to orchestrator) ---------- */
+
+  /** Generic entrypoint (kept for backward compatibility). */
   deliver(env: Envelope) {
-    // Log the inbound command
+    this.receive(env.from, env.channel, { payload: env.payload, metadata: env.metadata });
+  }
+
+  /** Receive an envelope from a role to the orchestrator and route to a handler. */
+  public receive(from: Role, channel: string, { payload, metadata }: { payload?: any; metadata?: any } = {}) {
+    // Log inbound exactly as received
     this.pushWire({
-      from: env.from,
+      from,
       to: "orchestrator",
-      channel: env.channel,
-      label: `Received command: ${env.channel}`,
-      payload: env.payload,
+      channel,
+      label: `Received: ${channel}`,
+      payload,
+      metadata,
     });
 
-    // Minimal command router (outline only)
-    if (env.channel === "page.outline.load") {
-      const url: string | undefined = env.payload?.url;
-      if (!url) {
-        this.failOutline("Missing outline URL in command payload");
-        return;
+    const handler = this.handlers.get(channel);
+    if (!handler) {
+      this.pushWire({
+        from: "orchestrator",
+        to: "orchestrator",
+        channel: "orchestrator:unhandled",
+        label: "No handler registered for channel",
+        metadata: { channel },
+      });
+      return;
+    }
+
+    try {
+      const maybe = handler({ from, to: "orchestrator", channel, payload, metadata });
+      if (maybe && typeof (maybe as any).then === "function") {
+        (maybe as Promise<void>).catch((err) => {
+          this.failGeneric(`Handler error for ${channel}`, { error: String(err) });
+        });
       }
-      this.loadOutline(url);
+    } catch (err: any) {
+      this.failGeneric(`Handler error for ${channel}`, { error: String(err?.message ?? err) });
     }
   }
 
-  /* ---------- outline loader (the only job for now) ---------- */
-  private async loadOutline(url: string) {
-    const started = performance.now();
-    this.patch({ status: "streaming", lastError: null });
+  // Convenience receivers for clarity at callsites
+  public receiveFromPage(channel: string, data?: { payload?: any; metadata?: any }) {
+    this.receive("page", channel, data ?? {});
+  }
+  public receiveFromBackend(channel: string, data?: { payload?: any; metadata?: any }) {
+    this.receive("backend", channel, data ?? {});
+  }
+  public receiveFromConsole(channel: string, data?: { payload?: any; metadata?: any }) {
+    this.receive("console", channel, data ?? {});
+  }
 
+  /** Record a synthetic inbound note (e.g., "backend:req") WITHOUT routing to handlers. */
+  public noteIncoming(from: Role, channel: string, { payload, metadata }: { payload?: any; metadata?: any } = {}, label?: string) {
+    this.pushWire({
+      from,
+      to: "orchestrator",
+      channel,
+      label: label ?? `Incoming: ${channel}`,
+      payload,
+      metadata,
+    });
+  }
+
+  /* ---------- SENDING (outbound from orchestrator) ---------- */
+
+  /** Emit an envelope FROM orchestrator to any role (also logged). */
+  public emit(to: Role, channel: string, { payload, metadata }: { payload?: any; metadata?: any } = {}, label?: string) {
+    this.deps.onDeliver?.({ from: "orchestrator", to, channel, payload, metadata });
     this.pushWire({
       from: "orchestrator",
-      to: "backend",
-      channel: "backend:req",
-      label: `HTTP GET → ${url}`,
-      payload: { url },
+      to,
+      channel,
+      label: label ?? `Sent: ${channel}`,
+      payload,
+      metadata,
     });
-
-    const ctrl = new AbortController();
-    try {
-      const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
-      const httpStatus = res.status;
-
-      // progress pulse with HTTP status
-      this.toPage("orch.outline.progress", { httpStatus }, "Outline request in-flight (HTTP status observed)");
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        this.failOutline(`Outline request failed (HTTP ${httpStatus})`, { httpStatus, details: text });
-        return;
-      }
-
-      const raw = await res.json();
-      const fetchedAt = new Date().toISOString();
-
-      // bytes from header (fallback below)
-      let bytes: number | null = null;
-      const len = res.headers.get("content-length");
-      if (len) bytes = Number(len);
-      if (bytes == null) {
-        try { bytes = JSON.stringify(raw).length; } catch { /* ignore */ }
-      }
-
-      // log backend frame for debug
-      this.pushWire({
-        from: "backend",
-        to: "orchestrator",
-        channel: "backend:frame",
-        label: "Backend responded with outline JSON",
-        payload: { httpStatus, bytes, preview: JSON.stringify(raw).slice(0, 300) },
-      });
-
-      // final deliver to page
-      this.toPage(
-        "page.outline.loaded",
-        { raw, httpStatus, bytes, fetchedAt },
-        "Delivered outline payload to page"
-      );
-
-      // duration pulse
-      this.toPage(
-        "orch.outline.progress",
-        { httpStatus, bytes, durationMs: Math.round(performance.now() - started) },
-        "Outline fetch completed (timing/bytes)"
-      );
-
-      this.patch({ status: "idle" });
-    } catch (err: any) {
-      if (err?.name === "AbortError") {
-        this.failOutline("Outline request aborted by user");
-      } else {
-        this.failOutline(`Outline request error: ${String(err?.message ?? err)}`);
-      }
-    }
   }
 
-  private failOutline(message: string, extra?: any) {
+  public sendToPage(channel: string, data?: { payload?: any; metadata?: any }, bluf?: string) {
+    this.emit("page", channel, data ?? {}, bluf);
+  }
+  public sendToConsole(channel: string, data?: { payload?: any; metadata?: any }, bluf?: string) {
+    this.emit("console", channel, data ?? {}, bluf);
+  }
+  public sendToBackend(channel: string, data?: { payload?: any; metadata?: any }, bluf?: string) {
+    this.emit("backend", channel, data ?? {}, bluf);
+  }
+
+  /* ---------- generic failure pulse ---------- */
+  private failGeneric(message: string, extra?: any) {
     this.pushWire({
       from: "backend",
       to: "orchestrator",
       channel: "backend:error",
-      label: "Outline load failed",
-      payload: { message, ...(extra ?? {}) },
+      label: "Handler failed",
+      metadata: { message, ...(extra ?? {}) },
     });
-    this.toPage("page.outline.error", { message, ...(extra ?? {}) }, "Reported outline error to page");
     this.patch({ status: "error", lastError: message });
-  }
-
-  /* ---------- helper: orchestrator → page ---------- */
-  private toPage(channel: string, payload?: any, bluf?: string) {
-    // DI hook for the page
-    this.deps.onDeliver?.({ from: "orchestrator", to: "page", channel, payload });
-
-    // also log to wire for your debug panels
-    this.pushWire({
-      from: "orchestrator",
-      to: "page",
-      channel,
-      label: bluf ?? `Sent: ${channel}`,
-      payload,
-    });
   }
 }
 

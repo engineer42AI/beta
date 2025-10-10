@@ -11,7 +11,8 @@ import { usePageConfig } from "@/stores/pageConfig-store";
 import PageDebuggingDashboard from "./page_debugging_dashboard";
 
 import { orchestrator } from "@/lib/pageOrchestrator";
-import { CH, BACKEND_ENDPOINTS } from "./pageContracts";
+
+import { registerOutlineHandlers, WF } from "./outline.handlers";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
@@ -62,62 +63,76 @@ export default function BrowseCertSpecV4Page() {
 
   // Configure orchestrator (binding + how to handle messages to the page)
   useEffect(() => {
-    if (boundTabId) {
-      try { (orchestrator as any).purgeWireForTab?.(boundTabId); } catch {}
-    }
+      if (boundTabId) { try { (orchestrator as any).purgeWireForTab?.(boundTabId); } catch {} }
 
-    orchestrator.configure({
-      getBinding: () => ({ route, pageId: pageId ?? undefined, tabId: boundTabId ?? undefined }),
+      orchestrator.configure({
+        getBinding: () => ({ route, pageId: pageId ?? undefined, tabId: boundTabId ?? undefined }),
+        onDeliver: ({ to, channel, payload, metadata }) => {
+          if (to !== "page") return;
+          if (channel !== WF.OUTLINE_LOAD) return;
 
-      onDeliver: ({ to, channel, payload }) => {
-        if (to !== "page") return;
+          const evt = metadata?.event as string | undefined;
 
-        if (channel === CH.PAGE_OUTLINE_LOADED) {
-          setLoading(false);
-          setLoadError(null);
-          setHttpStatus(payload?.httpStatus ?? null);
-          setBytes(payload?.bytes ?? null);
-          setDurationMs(null); // we also get a progress pulse below that carries duration
-          setRawPayload(payload?.raw ?? null);
+          if (evt === "started") {
+            setAttempt(n => n + 1);
+            setLoading(true);
+            setLoadError(null);
+            setHttpStatus(null);
+            setDurationMs(null);
+            setBytes(null);
+            return;
+          }
 
-          // extract page data
-          setOutline(payload?.raw?.outline ?? null);
-          setSectionTraces(payload?.raw?.section_traces ?? {});
-        }
-        if (channel === CH.ORCH_OUTLINE_PROGRESS) {
-          setHttpStatus(payload?.httpStatus ?? null);
-          if (typeof payload?.durationMs === "number") setDurationMs(payload.durationMs);
-          if (typeof payload?.bytes === "number") setBytes(payload.bytes);
-        }
-        if (channel === CH.PAGE_OUTLINE_ERROR) {
-          setLoading(false);
-          setLoadError(payload?.message ?? "Unknown error");
-          setHttpStatus(payload?.httpStatus ?? null);
-        }
-      },
-    });
+          if (evt === "progress") {
+            if (typeof metadata?.httpStatus === "number") setHttpStatus(metadata.httpStatus);
+            if (typeof metadata?.bytes === "number") setBytes(metadata.bytes);
+            if (typeof metadata?.durationMs === "number") setDurationMs(metadata.durationMs);
+            return;
+          }
+
+          if (evt === "success") {
+            // payload IS the RAW backend JSON
+            const raw = payload ?? null;
+            setRawPayload(raw);
+            setOutline(raw?.outline ?? null);
+            setSectionTraces(raw?.section_traces ?? {});
+            setHttpStatus(typeof metadata?.httpStatus === "number" ? metadata.httpStatus : null);
+            setBytes(typeof metadata?.bytes === "number" ? metadata.bytes : null);
+            setLoading(false);
+            return;
+          }
+
+          if (evt === "error") {
+            setLoading(false);
+            setLoadError(metadata?.message ?? "Unknown error");
+            setHttpStatus(typeof metadata?.httpStatus === "number" ? metadata.httpStatus : null);
+            return;
+          }
+        },
+      });
+
+      // (re)register page handlers
+      registerOutlineHandlers();
+
+      return () => {
+        orchestrator.unregisterAllHandlers();
+      };
   }, [route, pageId, boundTabId]);
 
-  // Kick off outline load ONCE (per page/tab binding)
   const didRequestRef = useRef(false);
+
+  // once per bind (your didRequestRef logic is fine)
   useEffect(() => {
-    if (!pageId || !boundTabId) return;
-    if (didRequestRef.current) return;
-    didRequestRef.current = true;
-
-    setAttempt(n => n + 1);
-    setLoading(true);
-    setLoadError(null);
-    setHttpStatus(null);
-    setDurationMs(null);
-    setBytes(null);
-
-    orchestrator.deliver({
-      from: "page",
-      to: "orchestrator",
-      channel: CH.PAGE_OUTLINE_LOAD,
-      payload: { url: `${BASE}${BACKEND_ENDPOINTS.outline}` },
-    });
+      if (!pageId || !boundTabId) return;
+      if (didRequestRef.current) return;
+      didRequestRef.current = true;
+      orchestrator.deliver({
+        from: "page",
+        to: "orchestrator",
+        channel: WF.OUTLINE_LOAD,   // simple instruction
+        payload: null,
+        metadata: undefined,
+      });
   }, [pageId, boundTabId, route]);
 
   /* ---------- persistence & selections (unchanged) ---------- */
@@ -192,13 +207,25 @@ export default function BrowseCertSpecV4Page() {
       </header>
 
       <section>
-        <OutlineTree
-          subparts={subparts}
-          sectionTraces={sectionTraces}
-          sectionStats={sectionStats}
-          selectedTraces={selectedTraces}
-          setSelectedTraces={setSelectedTraces}
-        />
+         {loadError ? (
+           <div className="text-sm text-red-600">
+             {loadError}
+           </div>
+         ) : !isBound ? (
+           <div className="text-sm text-muted-foreground">Open an AI tab to begin…</div>
+         ) : loading ? (
+           <div className="text-sm text-muted-foreground">Loading outline…</div>
+         ) : outline ? (
+           <OutlineTree
+             subparts={subparts}
+             sectionTraces={sectionTraces}
+             sectionStats={sectionStats}
+             selectedTraces={selectedTraces}
+             setSelectedTraces={setSelectedTraces}
+           />
+         ) : (
+           <div className="text-sm text-muted-foreground">No outline loaded.</div>
+         )}
       </section>
 
       {/* Debug dashboard you already have; it will reflect the orchestrator pulses */}

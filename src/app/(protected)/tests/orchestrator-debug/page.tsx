@@ -1,8 +1,8 @@
- "use client";
+// src/app/(protected)/tests/orchestrator-debug/page.tsx
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { orchestrator, type WireEntry, type OrchestratorPublicState } from "@/lib/pageOrchestrator";
-import { Inspector } from "react-inspector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,35 +11,130 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { ChevronDown, Clock } from "lucide-react";
+import JsonViewer from "@/components/dev/JsonViewer";
+import { WF } from "@/app/(protected)/system-b/browse-cert-specs-V4/outline.handlers";
 
 /* ── role text colors (no row fills) ───────────────────────────── */
 const roleColor: Record<WireEntry["from"] | WireEntry["to"], string> = {
   page: "text-emerald-700",
-  zustand: "text-emerald-800",
   console: "text-blue-700",
   backend: "text-orange-700",
   orchestrator: "text-slate-700",
 };
 
-/* ── define workflow “triggers” (extend over time) ─────────────── */
-const CATEGORY_TRIGGERS: Record<string, string> = {
-  "page.outline.load": "PAGE_OUTLINE_LOAD",
-  // add more: "page.some.workflow.start": "SOME_WORKFLOW"
-};
+/* ── helper: event & runId from metadata ───────────────────────── */
+function getEvent(e: WireEntry): string | undefined {
+  return e?.metadata?.event as string | undefined;
+}
+function getRunId(e: WireEntry): string | undefined {
+  return e?.metadata?.runId as string | undefined;
+}
+function getStep(e: WireEntry): number | undefined {
+  const s = e?.metadata?.step;
+  return typeof s === "number" ? s : undefined;
+}
 
+/* ── workflow trigger: start a group on workflow 'started' ─────── */
+function isWorkflowStart(e: WireEntry): boolean {
+  if (e.channel !== WF.OUTLINE_LOAD) return false;
+  const ev = getEvent(e);
+  return ev === "initialRequest" || ev === "started";
+}
+
+/* ── status helpers ─────────────────────────────────────────────── */
+function rowStatusText(e: WireEntry) {
+  if (typeof e.metadata?.httpStatus === "number") return String(e.metadata.httpStatus);
+  if (getEvent(e) === "error") return "error";
+  return "";
+}
+function statusClass(t: string) {
+  return t === "error" ? "text-red-600"
+    : /^\d{3}$/.test(t) && Number(t) >= 400 ? "text-red-600"
+    : /^\d{3}$/.test(t) && Number(t) >= 300 ? "text-amber-600"
+    : "text-muted-foreground";
+}
+
+/* ── group type ─────────────────────────────────────────────────── */
 type WorkflowGroup = {
-  id: string;                 // stable id (first trigger ts + tab)
-  category: string;           // e.g., PAGE_OUTLINE_LOAD
+  id: string;                 // stable id (runId + tab)
+  workflow: string;           // e.g., outline.load
+  runId: string;
   tabId?: string | null;
   pageId?: string | null;
   route?: string | null;
   startedTs: number;
   status: "running" | "ok" | "error";
   httpStatus?: number | null;
-  rows: WireEntry[];          // entries that belong to this workflow
+  rows: WireEntry[];
 };
 
 type Opt = { value: string; label: string };
+
+/* ── derive grouped workflows from the raw wire ─────────────────── */
+function groupWire(wire: WireEntry[]): WorkflowGroup[] {
+  // Only consider rows that belong to a workflow run (have runId)
+  const workflowRows = wire.filter(e => getRunId(e));
+
+  // chronological pass for grouping
+  const sorted = [...workflowRows].sort((a, b) => a.ts - b.ts);
+
+  const active = new Map<string, WorkflowGroup>();
+  const groups: WorkflowGroup[] = [];
+
+  for (const e of sorted) {
+    const event = getEvent(e);
+    const runId = getRunId(e)!; // we filtered for runId
+    const key = `${e.tabId ?? "—"}::${runId}`;
+
+    // ✅ start a group when we see the first starter event (initialRequest OR started)
+    if (isWorkflowStart(e) && !active.get(key)) {
+      const g: WorkflowGroup = {
+        id: key,
+        workflow: e.channel, // e.g., "outline.load"
+        runId,
+        tabId: e.tabId ?? null,
+        pageId: e.pageId ?? null,
+        route: e.route ?? null,
+        startedTs: e.ts,      // note: could be initialRequest timestamp
+        status: "running",
+        rows: [],
+      };
+      groups.push(g);
+      active.set(key, g);
+    }
+
+    // attach to current group if it exists
+    const g = active.get(key);
+    if (g) {
+      g.rows.push(e);
+
+      // keep latest context (or first non-null)
+      if (e.route && !g.route) g.route = e.route;
+      if (e.pageId && !g.pageId) g.pageId = e.pageId;
+
+      const hs = typeof e.metadata?.httpStatus === "number" ? e.metadata.httpStatus : null;
+      if (hs != null) g.httpStatus = hs;
+
+      if (event === "error") g.status = "error";
+      else if (event === "success") g.status = "ok";
+      else if (g.status !== "error" && g.status !== "ok") g.status = "running";
+    }
+  }
+
+  // Order rows inside a group by step (then ts) — newest first at the top
+  for (const g of groups) {
+    g.rows.sort((a, b) => {
+      const sa = getStep(a), sb = getStep(b);
+      if (sa != null && sb != null) return sb - sa; // step desc
+      if (sa != null && sb == null) return 1;       // unknowns last
+      if (sa == null && sb != null) return -1;
+      return b.ts - a.ts;                            // time desc
+    });
+  }
+
+  // Newest groups first by start time
+  return groups.sort((a, b) => b.startedTs - a.startedTs);
+}
 
 function ColumnFilter({
   label, value, onChange, options,
@@ -82,84 +177,6 @@ function ColumnFilter({
   );
 }
 
-/* ── helpers for status + http status ───────────────────────────── */
-function rowStatusText(e: WireEntry) {
-  if (typeof e.payload?.httpStatus === "number") return String(e.payload.httpStatus);
-  if (e.channel.toLowerCase().includes("error")) return "error";
-  return "";
-}
-function statusClass(t: string) {
-  return t === "error" ? "text-red-600"
-    : /^\d{3}$/.test(t) && Number(t) >= 400 ? "text-red-600"
-    : /^\d{3}$/.test(t) && Number(t) >= 300 ? "text-amber-600"
-    : "text-muted-foreground";
-}
-
-/* ── derive grouped workflows from the raw wire ─────────────────── */
-function groupWire(wire: WireEntry[]): WorkflowGroup[] {
-  // Process in chronological order, then render newest groups first.
-  const sorted = [...wire].sort((a, b) => a.ts - b.ts);
-
-  // track the currently active workflow per tabId
-  const activeByTab = new Map<string | null | undefined, WorkflowGroup>();
-
-  // final groups
-  const groups: WorkflowGroup[] = [];
-
-  for (const e of sorted) {
-    const cat = CATEGORY_TRIGGERS[e.channel]; // is this a trigger?
-    const key = e.tabId ?? null;
-
-    // start a new workflow if we hit a trigger
-    if (cat) {
-      const id = `${cat}:${key ?? "—"}:${e.ts}`;
-      const g: WorkflowGroup = {
-        id,
-        category: cat,
-        tabId: e.tabId ?? null,
-        pageId: e.pageId ?? null,
-        route: e.route ?? null,
-        startedTs: e.ts,
-        status: "running",
-        rows: [],
-      };
-      groups.push(g);
-      activeByTab.set(key, g);
-    }
-
-    // attach current row to the active workflow for this tab (if any)
-    const current = activeByTab.get(key);
-    if (current) {
-      current.rows.push(e);
-
-      // keep the most recent binding context (route/page) from any row
-      if (e.route) current.route = e.route;
-      if (e.pageId) current.pageId = e.pageId;
-
-      // surface httpStatus if present
-      const hs = typeof e.payload?.httpStatus === "number" ? e.payload.httpStatus : null;
-      if (hs != null) current.httpStatus = hs;
-
-      // update status heuristics
-      if (e.channel.toLowerCase().includes("error")) {
-        current.status = "error";
-      } else if (e.channel === "page.outline.loaded") {
-        current.status = "ok";
-      } else if (current.status !== "error" && current.status !== "ok") {
-        current.status = "running";
-      }
-    }
-  }
-
-  for (const g of groups) {
-      // newest-first rows inside each group
-      g.rows.sort((a, b) => b.ts - a.ts);
-  }
-
-  // Newest-first by group start
-  return groups.sort((a, b) => b.startedTs - a.startedTs);
-}
-
 export default function OrchestratorWire() {
   const [wire, setWire] = useState<WireEntry[]>(orchestrator.getWire?.() ?? []);
   const [state, setState] = useState<OrchestratorPublicState | null>(orchestrator.getState?.() ?? null);
@@ -169,9 +186,9 @@ export default function OrchestratorWire() {
 
   const groups = useMemo(() => groupWire(wire), [wire]);
 
-  // Filters (Category, Tab)
-  const categoryOptions = useMemo(
-    () => Array.from(new Set(groups.map(g => g.category))).sort(),
+  // Filters (Workflow, Tab)
+  const workflowOptions = useMemo(
+    () => Array.from(new Set(groups.map(g => g.workflow))).sort(),
     [groups]
   );
   const tabOptions = useMemo(
@@ -179,15 +196,15 @@ export default function OrchestratorWire() {
     [groups]
   );
 
-  const [fCategory, setFCategory] = useState<string | null>(null);
+  const [fWorkflow, setFWorkflow] = useState<string | null>(null);
   const [fTab, setFTab] = useState<string | null>(null);
 
   const visible = useMemo(
     () => groups.filter(g =>
-      (!fCategory || g.category === fCategory) &&
+      (!fWorkflow || g.workflow === fWorkflow) &&
       (!fTab || (g.tabId ?? "—") === fTab)
     ),
-    [groups, fCategory, fTab]
+    [groups, fWorkflow, fTab]
   );
 
   const lastTs = wire.length ? new Date(wire[wire.length - 1]!.ts).toLocaleTimeString() : "—";
@@ -209,7 +226,7 @@ export default function OrchestratorWire() {
 
       {/* group-level filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <ColumnFilter label="Category" value={fCategory} onChange={setFCategory} options={categoryOptions} />
+        <ColumnFilter label="Workflow" value={fWorkflow} onChange={setFWorkflow} options={workflowOptions} />
         <ColumnFilter label="Tab" value={fTab} onChange={setFTab} options={tabOptions} />
       </div>
 
@@ -229,7 +246,7 @@ export default function OrchestratorWire() {
                 {/* group header */}
                 <summary className="list-none px-3 py-2 cursor-pointer grid grid-cols-[220px_1fr_auto] gap-3 items-center">
                   <div className="flex items-center gap-2 min-w-0">
-                    <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">{g.category}</Badge>
+                    <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">{g.workflow}</Badge>
                     <span className={cn("px-1.5 py-[2px] rounded-full text-[10px]", statusBadge)}>
                       {g.status}
                     </span>
@@ -293,21 +310,23 @@ export default function OrchestratorWire() {
                           <div className="font-mono text-muted-foreground text-[11px]">{e.tabId ?? "—"}</div>
                         </summary>
 
-                        {/* payload inspector */}
-                        <div className="px-3 pb-3">
-                          <div className="rounded-md border bg-background/60">
-                            <div className="px-2 py-1.5 text-[11px] text-muted-foreground border-b">Payload</div>
-                            <div className="p-2 overflow-auto">
-                              <Inspector
-                                theme="chromeLight"
-                                table={false}
-                                expandLevel={1}
-                                sortObjectKeys
-                                showNonenumerable={false}
-                                data={e.payload ?? {}}
-                              />
+                        {/* payload + metadata inspectors */}
+                        <div className="px-3 pb-3 space-y-2">
+                          {typeof e.payload !== "undefined" && (
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Payload</div>
+                              <JsonViewer value={e.payload} defaultOpen={1} className="p-2" />
                             </div>
-                          </div>
+                          )}
+                          {typeof e.metadata !== "undefined" && (
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Metadata</div>
+                              <JsonViewer value={e.metadata} defaultOpen={1} className="p-2" />
+                            </div>
+                          )}
+                          {typeof e.payload === "undefined" && typeof e.metadata === "undefined" && (
+                            <div className="text-xs text-muted-foreground">No payload or metadata.</div>
+                          )}
                         </div>
                       </details>
                     );
