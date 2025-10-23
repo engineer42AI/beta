@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-# ---- agent types ------------------------------------------------------------
+# ---- agent_langgraph types ------------------------------------------------------------
 class AgentInputs(BaseModel):
     trace_block: str
     cites_block: str
@@ -427,7 +427,7 @@ if __name__ == "__main__":
     cites_block   = ops.format_citations_block(bundle["trace"], bundle["cites"], include_uuids=False)
     intents_block = ops.format_intents_block(bundle["trace"], bundle["intents"], include_uuids=False)
 
-    # 4) Run the “sandbox” agent with a concrete query
+    # 4) Run the “sandbox” agent_langgraph with a concrete query
 
     tester = WorkflowAgentTester(query, trace_block, cites_block, intents_block)
     asyncio.run(tester.run())

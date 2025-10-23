@@ -29,34 +29,25 @@ ALIASES = {
 
 def load_agent_module(name: str):
     """
-    Resolution order (generic → graphs → app.graphs), with alias support.
+    Load the known agent module for a given alias, without searching.
     """
     resolved = ALIASES.get(name, name)
+    module_path = f"src.graphs.{resolved}.agent"  # ✅ single explicit target
 
-    candidates = (
-        f"src.agents.{resolved}.agent",     # generic agents/<name>/agent.py
-        f"src.graphs.{resolved}.agent",     # graphs/<name>/agent.py  <-- your case
-        f"src.app.graphs.{resolved}.agent", # if graphs/ lives under app/
-    )
-
-    tried = []
-    for mod_path in candidates:
-        tried.append(mod_path)
-        try:
-            return importlib.import_module(mod_path)
-        except ModuleNotFoundError:
-            continue
-
-    raise HTTPException(
-        status_code=404,
-        detail={
-            "error": "Agent module not found",
-            "name": name,
-            "resolved": resolved,
-            "tried": tried,
-            "sys_path_head": sys.path[:5],
-        },
-    )
+    try:
+        return importlib.import_module(module_path)
+    except ModuleNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "Agent module not found",
+                "name": name,
+                "resolved": resolved,
+                "expected_module": module_path,
+                "hint": "Check that agent.py exists and that all __init__.py files are present.",
+                "sys_path_head": sys.path[:5],
+            },
+        ) from e
 
 # -------- non-stream (returns final report dict) --------
 @router.post("/{name}/run")

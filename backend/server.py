@@ -15,7 +15,7 @@ log = logging.getLogger("e42-agents")
 
 app = FastAPI(title="Engineer42 Agents")
 
-# Keep agent config inside the agent file (model/temperature/env)
+# Keep agent_langgraph config inside the agent_langgraph file (model/temperature/env)
 inline = InlineWorkflowAgent()
 
 class InlineRequest(BaseModel):

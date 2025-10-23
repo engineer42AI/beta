@@ -1,4 +1,4 @@
-# utils.py
+# backend/src/graphs/cs25_graph/utils.py
 
 import json, hashlib
 from pathlib import Path
@@ -17,6 +17,8 @@ import textwrap
 from typing import Deque, Iterable
 from collections import defaultdict, deque
 from typing import Dict, Any, List, Optional, Tuple
+
+
 class ManifestGraph:
     """
     One class to:
@@ -1336,3 +1338,145 @@ class GraphOps:
                 out_node["intent"] = intents[0]
             else:
                 out_node["intents"] = intents
+
+    # --- NEW: iterate all Section nodes ---------------------------------
+    # following functions are for rank_sections_by_intent_tool
+    #
+    #
+    # ======================
+    def iter_section_nodes(self) -> list[dict]:
+        out = []
+        for nid, d in self.G.nodes(data=True):
+            if d.get("ntype") == "Section":
+                out.append({
+                    "section_uuid": nid,
+                    "number": d.get("number"),
+                    "title": d.get("title"),
+                    "label": d.get("label"),
+                })
+        return out
+
+    # --- NEW: generic upward trace starting at any node -----------------
+    def _build_trace_from_node(self, start_uuid: str) -> list[dict]:
+        """
+        Walk upward via incoming CONTAINS edges until Document.
+        Returns list from Document → … → start_node.
+        """
+        if start_uuid not in self.G:
+            return []
+        path, cur, visited = [], start_uuid, set()
+        while cur and cur not in visited:
+            visited.add(cur)
+            n = self.G.nodes.get(cur, {})
+            ntype = n.get("ntype")
+            rec = {"uuid": cur, "ntype": ntype}
+
+            if ntype == "Document":
+                rec.update({"label": n.get("label"), "title": n.get("title"),
+                            "issuer": n.get("issuer"),
+                            "amendment": n.get("current_amendment"),
+                            "effective_date": n.get("effective_date")})
+            elif ntype == "Subpart":
+                rec.update({"label": n.get("label"), "code": n.get("code"), "title": n.get("title")})
+            elif ntype == "Heading":
+                rec.update({"label": n.get("label")})
+            elif ntype == "Section":
+                rec.update({"label": n.get("label"),
+                            "number": n.get("number"),
+                            "title": n.get("title"),
+                            "section_type": n.get("section_type")})
+            else:
+                rec.update({"label": n.get("label") or n.get("number") or n.get("title")})
+
+            path.append(rec)
+
+            parents = [u for (u, v, d) in self.G.in_edges(cur, data=True) if d.get("relation") == "CONTAINS"]
+            cur = parents[0] if parents else None
+        return list(reversed(path))
+
+    # --- NEW: collect ONLY section-level intents ------------------------
+    def _collect_section_intents_only(self, section_uuid: str) -> list[dict]:
+        """
+        Follow Section --HAS_INTENT--> Intent and return normalized intent entries.
+        """
+        if not (section_uuid and section_uuid in self.G):
+            return []
+        intents = []
+        for _, tgt, d in self.G.out_edges(section_uuid, data=True):
+            if d.get("relation") != "HAS_INTENT":
+                continue
+            inode = self.G.nodes.get(tgt, {})
+            if inode.get("ntype") == "Intent":
+                intents.append({
+                    "uuid_intent": tgt,
+                    "intent": inode.get("intent"),
+                    "summary": inode.get("summary"),
+                    "events": inode.get("events"),
+                })
+        return intents
+
+    # --- NEW: build section bundle (context + intents) ------------------
+    def build_records_for_section(self, section_uuid: str) -> dict:
+        """
+        Returns:
+          {
+            "section_uuid": <str>,
+            "trace": <List[NodeRecord]>   # Document → … → Section
+            "intents": <List[IntentRecordForSection]>  # HAS_INTENT from Section
+          }
+        """
+        trace = self._build_trace_from_node(section_uuid)
+        intents = self._collect_section_intents_only(section_uuid)
+        return {"section_uuid": section_uuid, "trace": trace, "intents": intents}
+
+    # --- NEW: format a compact section context block --------------------
+    def format_section_context_block(self, trace: list[dict], *, include_uuids: bool = False) -> str:
+        """
+        Markdown block: Document → Subpart/Heading → Section (no paragraphs).
+        """
+        if not trace:
+            return "## 🟢 Section Context\n\n> *(no context)*\n"
+        lines = ["## 🟢 Section Context", ""]
+        for n in trace:
+            t, uid = n.get("ntype"), n.get("uuid")
+            if t == "Document":
+                lines += [f"### 📄 Document",
+                          f"- **Label:** {self._md_escape(n.get('label'))}",
+                          f"- **Title:** {self._md_escape(n.get('title'))}"]
+            elif t == "Subpart":
+                lines += [f"### 🧩 Subpart",
+                          f"- **Label:** {self._md_escape(n.get('label'))}"]
+            elif t == "Heading":
+                lines += [f"### 🔖 Heading",
+                          f"- **Label:** {self._md_escape(n.get('label'))}"]
+            elif t == "Section":
+                lines += [f"### § Section",
+                          f"- **Label:** {self._md_escape(n.get('label'))}"]
+            else:
+                lines += [f"### {t}", f"- **Label:** {self._md_escape(n.get('label'))}"]
+            if include_uuids and uid:
+                lines.append(f"- **UUID:** `{uid}`")
+            lines.append("")
+        return "\n".join(lines)
+
+    # --- NEW: format section-level intents only -------------------------
+    def format_section_intents_block(self, section_uuid: str, intents: list[dict], *,
+                                     include_uuids: bool = False) -> str:
+        lines = ["## 🔵 Section Intent", ""]
+        if not intents:
+            lines.append("> *(no section-level intent)*")
+            return "\n".join(lines)
+        for it in intents:
+            if include_uuids:
+                lines.append(f"`uuid_intent: {it.get('uuid_intent')}`")
+            if it.get("summary"):
+                lines.append(f"- **Summary:** {self._md_escape(it['summary'])}")
+            #if it.get("intent"):
+            #    lines.append(f"- **Intent:** {self._md_escape(it['intent'])}")
+            #if it.get("events"):
+            #    lines.append(f"- **Events:**")
+            #    for ev in (it["events"] or []):
+            #        lines.append(f"  - {self._md_escape(ev)}")
+            lines.append("")
+        return "\n".join(lines)
+

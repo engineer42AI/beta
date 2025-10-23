@@ -4,3 +4,8 @@ pydantic
 openai
 networkx
 python-dotenv
+langchain
+langgraph
+langchain-core
+langgraph-checkpoint-redis
+langchain-openai

@@ -71,7 +71,7 @@ Important:
         #<CITATIONS>
         #{inputs.cites_block or ""}
         #</CITATIONS>
-        print(user_content)
+        # print(user_content)
         resp = await self.client.responses.parse(
             model=self.model,
             input=[{"role": "system", "content": system},
@@ -373,6 +373,7 @@ def _get_runtime():
         _RUNTIME_CACHE = (mg, ops)
     return _RUNTIME_CACHE
 
+
 async def stream(
     *,
     query: str,
@@ -389,11 +390,12 @@ async def stream(
         query=query,
         model=model,
         batch_size=batch_size,
-        limit=limit,
+        limit=limit, # for debuging
         pricing_per_million=pricing_per_million,
         selected_trace_ids=selected_trace_ids,         # <-- pass through
     ):
         yield evt
+
 
 async def run_once(
     *,
