@@ -1480,3 +1480,50 @@ class GraphOps:
             lines.append("")
         return "\n".join(lines)
 
+    def get_node_type(self, uuid: str) -> Optional[str]:
+        n = self.G.nodes.get(uuid)
+        return n.get("ntype") if n else None
+
+    def get_node_meta(self, uuid: str) -> dict:
+        n = self.G.nodes.get(uuid, {})
+        return {
+            "node_uuid": uuid,
+            "node_ntype": n.get("ntype"),
+            "label": n.get("label"),
+            "number": n.get("number"),
+            "title": n.get("title"),
+            "bottom_uuid": n.get("bottom_uuid") if n.get("ntype") == "Trace" else None,
+        }
+
+    def build_records_for_trace_uuid(self, trace_uuid: str, *, bottom_uuid: Optional[str] = None) -> dict:
+        # prefer caller-provided bottom_uuid; else pull from trace node
+        btm = bottom_uuid or self.G.nodes.get(trace_uuid, {}).get("bottom_uuid")
+        if not btm:
+            return {"trace_uuid": trace_uuid, "bottom_uuid": None, "trace": [], "cites": [], "intents": []}
+        trace = self._build_trace(btm)
+        cites = self._collect_cites(trace)
+        intents = self._collect_intents(trace, btm)
+        return {"trace_uuid": trace_uuid, "bottom_uuid": btm, "trace": trace, "cites": cites, "intents": intents}
+
+    def pick_bottom_intent(self, intents: list[dict], bottom_uuid: str) -> Optional[dict]:
+        for entry in intents or []:
+            if entry.get("uuid_node") == bottom_uuid:
+                items = entry.get("intents") or []
+                return items[0] if items else None
+        return None
+
+    def paginate_citations(self, cites: list[dict], limit: Optional[int], offset: Optional[int]) -> tuple[
+        list[dict], int]:
+        if not limit:  # None or 0 means “no paging”
+            return cites, len(cites)
+        flat = []
+        for node in cites:
+            # split inbound/outbound into flat rows but keep original shape identifiers
+            for c in (node.get("inbound_cites") or []):
+                flat.append({"node_uuid": node["uuid_node"], "direction": "inbound", **c})
+            for c in (node.get("outbound_cites") or []):
+                flat.append({"node_uuid": node["uuid_node"], "direction": "outbound", **c})
+        total = len(flat)
+        start = max(0, int(offset or 0))
+        end = start + int(limit)
+        return flat[start:end], total

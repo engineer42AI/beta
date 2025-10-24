@@ -10,6 +10,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from .routers import agents, health
 from .routers.router_cs25 import router as cs25_router
+from .routers.router_cs25_outline import router as cs25_outline_router
+
 from src.graphs.cs25_graph.agent_langgraph.agent_langgraph_v2 import init_runtime
 from dotenv import load_dotenv, find_dotenv
 
@@ -96,3 +98,4 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")
 app.include_router(cs25_router,   prefix="/api")
+app.include_router(cs25_outline_router, prefix="/api")
