@@ -168,6 +168,7 @@ async def recommend_sections_llm(
         store: BaseStore,
         ):
 
+
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set")
@@ -265,6 +266,7 @@ async def topic_llm(
         store: BaseStore,
         ):
 
+
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set")
@@ -286,6 +288,18 @@ async def topic_llm(
     ctx = item.value if item and hasattr(item, "value") else {}
     selected_ids = ctx.get("selected_ids", [])
     selected_count = {len(selected_ids)}
+
+    snapshot_rows = ctx.get("snapshotRows", [])
+
+    print(f"FROZEN: {state['selections_frozen']}, at {state['selections_frozen_at']}")
+
+    snapshot_count = len(snapshot_rows)
+
+    print("DEBUG ctx.selections_frozen:", ctx.get("selections_frozen"))
+    print("DEBUG selected_ids count:", selected_count)
+    print("DEBUG snapshotRows count:", snapshot_count)
+
+
 
     # TODO - what may work nicely here is if we didnt pass full message history here. Instead we would
     #  pass only user messages. But have an AI earlier before this node to infere whether user message is linked to

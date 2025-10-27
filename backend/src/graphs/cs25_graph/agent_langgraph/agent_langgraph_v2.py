@@ -157,6 +157,31 @@ async def _merge_graph_and_progress(graph_async_iter, progress_q: "asyncio.Queue
                 with contextlib.suppress(Exception):
                     await t
 
+
+async def upsert_tab_context(store, tab_id: str, new_ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Read existing context for this tab, shallow-merge with new_ctx, write back.
+    Return the merged ctx.
+    """
+    existing_item = await store.aget(("cs25_context", tab_id), "latest")
+
+    # unwrap whatever AsyncRedisStore gave us
+    if existing_item is None:
+        existing_val = {}
+    elif isinstance(existing_item, dict):
+        # some backends might already give you raw dicts if you're in memory
+        existing_val = existing_item
+    else:
+        # LangGraph's redis store returns an Item-like object with .value
+        existing_val = getattr(existing_item, "value", {}) or {}
+
+    # shallow merge (new_ctx wins)
+    merged = {**existing_val, **new_ctx}
+
+    await store.aput(("cs25_context", tab_id), "latest", merged)
+    return merged
+
+
 # ✅ Only these state keys will be emitted to the frontend as {"type":"state", "key":..., "value":...}
 EMIT_STATE_KEYS: set[str] = {"topic"}  # add more keys from AgentState as you introduce them
 
@@ -169,8 +194,11 @@ async def stream_agent_response(
     graph = await get_agent_graph()
     store = await get_store()
 
+    # merge context (selected_ids, frozen flags, snapshotRows, etc.) into Redis
     if context:
-        await store.aput(("cs25_context", tab_id), "latest", context)
+        merged_ctx = await upsert_tab_context(store, tab_id, context)
+    else:
+        merged_ctx = await store.aget(("cs25_context", tab_id), "latest") or {}
 
     config = {"configurable": {"thread_id": tab_id}}
     yield {"type": "run_start", "tab_id": tab_id}
@@ -192,6 +220,9 @@ async def stream_agent_response(
     init_state = {
         "messages": [{"role": "user", "content": query}],
         "tab_id": tab_id,
+        "selections_frozen": merged_ctx.get("selections_frozen"),
+        "selections_frozen_at": merged_ctx.get("selections_frozen_at"),
+
         # ❌ do not place functions (emit) in state
     }
 
@@ -277,125 +308,3 @@ async def stream_agent_response(
         yield {"type": "run_end", "tab_id": tab_id}
 
 
-
-# ============================================================
-# 🔍 ENGINEER42 STREAMING EVENT SCHEMA (NDJSON over HTTP)
-# ============================================================
-# Every line sent to the frontend is a compact JSON object
-# with a required field `"type"`.  This comment defines all
-# event types that can be emitted by `stream_agent_response()`.
-#
-# ─────────────────────────────────────────────────────────────
-# 🧭 Lifecycle
-# ─────────────────────────────────────────────────────────────
-# { "type": "run_start", "tab_id": "<session_id>" }
-# { "type": "run_end",   "tab_id": "<session_id>" }
-#
-# Emitted at the beginning and end of each agent run.
-# Used by the frontend to open/close a live stream session.
-#
-# ─────────────────────────────────────────────────────────────
-# 💬 Assistant Text (LLM Streaming)
-# ─────────────────────────────────────────────────────────────
-# { "type": "delta", "role": "assistant", "content": "<partial text>" }
-# { "type": "message", "role": "assistant", "content": "<final or full text>" }
-#
-# - "delta"   = small streamed token chunks (for typing animation)
-# - "message" = final assembled assistant message (complete thought)
-#
-# ─────────────────────────────────────────────────────────────
-# 🧰 Tool Calls & Results (LLM ↔ Backend Interaction)
-# ─────────────────────────────────────────────────────────────
-# { "type": "tool_call",
-#   "name": "<tool_name>",
-#   "args": { ... },
-#   "tool_call_id": "<id>",
-#   "node": "<graph_node_name>" }
-#
-# { "type": "tool_result",
-#   "name": "<tool_name>",
-#   "tool_call_id": "<id>",
-#   "content": "<short summary or status>",
-#   "node": "<graph_node_name>" }
-#
-# - Emitted when the LLM invokes or completes a backend tool.
-# - Used by the frontend for developer/debug panels and visual status.
-#
-# ─────────────────────────────────────────────────────────────
-# 🧩 State Updates (Controlled by EMIT_STATE_KEYS)
-# ─────────────────────────────────────────────────────────────
-# { "type": "state",
-#   "key": "<state_key>",      # e.g. "topic"
-#   "value": "<state_value>",  # e.g. "heat exchangers — design, compliance..."
-#   "node": "<graph_node_name>" }
-#
-# - Sent whenever a whitelisted AgentState key changes.
-# - Allows the frontend to dynamically render contextual state (topic, etc.).
-#
-# ─────────────────────────────────────────────────────────────
-# ⚙️ Node Progress & Analysis Events  ← NEW
-# ─────────────────────────────────────────────────────────────
-# These events are emitted directly by long-running LangGraph nodes
-# through the `progress_emit()` async callback.
-#
-# Each event follows a compact form:
-# { "type": "<namespace>.<event>", "tab_id": "<session_id>", ...<payload> }
-#
-# Example namespace for heavy analysis node:
-#
-# • findRelevantSections.run_start
-# • findRelevantSections.batch_start
-# • findRelevantSections.batch_progress
-# • findRelevantSections.item_done
-# • findRelevantSections.batch_end
-# • findRelevantSections.run_end
-#
-# Example event payloads:
-# { "type": "findRelevantSections.batch_progress",
-#   "done": 42,
-#   "total": 200,
-#   "elapsed_s": 3.41,
-#   "batch_cost": 0.0023 }
-#
-# { "type": "findRelevantSections.item_done",
-#   "item": { "trace_uuid": "...", "response": { ... }, "usage": { ... } } }
-#
-# - These are streamed *as they happen* from the backend node.
-# - The orchestrator routes them to both:
-#   • console view (live logs, stats, costs)
-#   • page view (batch metrics, results table, etc.)
-# - Any node can adopt its own namespace (e.g., `analysis.*`, `verify.*`).
-#
-# ─────────────────────────────────────────────────────────────
-# ⚠️ Error Handling
-# ─────────────────────────────────────────────────────────────
-# { "type": "error", "message": "<human-readable error>" }
-#
-# - Sent if an exception occurs server-side.
-# - Terminates the stream with error context.
-#
-# ─────────────────────────────────────────────────────────────
-# ✅ Example Full Stream Sequence
-# ─────────────────────────────────────────────────────────────
-# {"type":"run_start","tab_id":"ai-abc123"}
-# {"type":"state","key":"topic","value":"heat exchangers — design, compliance, safety","node":"topic_llm"}
-# {"type":"delta","role":"assistant","content":"Checking your selected sections..."}
-# {"type":"message","role":"assistant","content":"Here’s a brief summary of relevant sections."}
-# {"type":"tool_call","name":"find_relevant_sections","args":{"query":"heat exchanger"},"tool_call_id":"call_456","node":"tool_calling_llm"}
-# {"type":"findRelevantSections.batch_progress","done":20,"total":200,"elapsed_s":2.4}
-# {"type":"findRelevantSections.item_done","item":{"trace_uuid":"uuid123","response":{"relevant":true}}}
-# {"type":"findRelevantSections.batch_end","size":200,"batch_cost":0.0012}
-# {"type":"tool_result","name":"find_relevant_sections","tool_call_id":"call_456","content":"Relevance analysis complete","node":"tools_main"}
-# {"type":"message","role":"assistant","content":"Relevance scan complete. Check the page for detailed results."}
-# {"type":"run_end","tab_id":"ai-abc123"}
-#
-# ─────────────────────────────────────────────────────────────
-# 🔧 Summary of Event Types
-# ─────────────────────────────────────────────────────────────
-# run_start / run_end             → lifecycle markers
-# delta / message                 → assistant text (LLM stream)
-# tool_call / tool_result         → backend tool interactions
-# state                           → AgentState updates (topic, etc.)
-# findRelevantSections.*          → node-originated analysis stream
-# error                           → server error or stream failure
-# ============================================================

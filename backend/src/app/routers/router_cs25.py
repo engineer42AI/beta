@@ -1,5 +1,5 @@
 # backend/src/app/routers/router_cs25.py
-from typing import Any, Dict, Optional, AsyncGenerator
+from typing import Any, Dict, Optional, AsyncGenerator, List
 import asyncio
 import json
 
@@ -7,7 +7,12 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.graphs.cs25_graph.agent_langgraph.agent_langgraph_v2 import stream_agent_response
+from src.graphs.cs25_graph.agent_langgraph.agent_langgraph_v2 import (
+    stream_agent_response,
+    get_store,
+    upsert_tab_context,
+)
+
 from fastapi.encoders import jsonable_encoder
 
 def _line(obj: Dict[str, Any]) -> bytes:
@@ -64,3 +69,43 @@ async def run_agent_stream(payload: RunIn):
             "X-Accel-Buffering": "no",  # nginx: disable proxy buffering
         },
     )
+
+# ---------- NEW: freeze / snapshot sync ----------
+
+class SnapshotRowIn(BaseModel):
+    trace_uuid: str
+    path_labels: List[str]
+    relevant: Optional[bool] = None
+    rationale: Optional[str] = None
+
+
+class FreezeSyncIn(BaseModel):
+    tab_id: str = Field(..., description="Frontend tab/session id")
+    selections_frozen: bool
+    selections_frozen_at: str
+    snapshotRows: List[SnapshotRowIn]
+
+
+@router.post("/context/sync")
+async def sync_context(payload: FreezeSyncIn):
+    """
+    Persist the frozen snapshot + flags for this tab without running the agent.
+    This updates the same Redis store LangGraph already uses.
+    """
+    store = await get_store()
+
+    merged_ctx = await upsert_tab_context(
+        store,
+        payload.tab_id,
+        {
+            "selections_frozen": payload.selections_frozen,
+            "selections_frozen_at": payload.selections_frozen_at,
+            "snapshotRows": [jsonable_encoder(row) for row in payload.snapshotRows],
+        },
+    )
+
+    # send back whatever's now stored for debug / reconciliation
+    return {
+        "ok": True,
+        "context": merged_ctx,
+    }

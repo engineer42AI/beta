@@ -3,15 +3,17 @@
 from typing import Annotated, Literal, NotRequired, Optional
 from langgraph.prebuilt.chat_agent_executor import AgentState
 from typing import Optional
-
+from langgraph.graph import MessagesState
 
 class DeepAgentState(AgentState):
     relevance_run_status: str
     relevance_status: Literal["completed", "warning", "error"]
     explain_message: str
 
-from langgraph.graph import MessagesState
 
 class AgentState(MessagesState):
     tab_id: str
     topic: Optional[str]
+
+    selections_frozen: bool
+    selections_frozen_at: Optional[str]
