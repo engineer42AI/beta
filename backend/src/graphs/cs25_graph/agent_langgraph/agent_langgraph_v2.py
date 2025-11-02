@@ -302,7 +302,7 @@ async def stream_agent_response(
         async for source, payload in merged_iter:
             if source == "progress":
                 # debug: forwarded progress event from the bus
-                #print("[STREAM][progress]", {"sink": sink, "run_id": run_id, "tab_id": tab_id, "keys": list((payload or {}).keys())}, flush=True)
+                print("[STREAM][progress]", {"sink": sink, "run_id": run_id, "tab_id": tab_id, "keys": list((payload or {}).keys())}, flush=True)
                 yield {"source": "progress", **(payload or {})}
                 continue
 
@@ -321,7 +321,7 @@ async def stream_agent_response(
                                 emitted_any = True
                                 if sink == "agent_langgraph":  # stream only for agent_langgraph
                                     assembled.append(part)
-                                    #print("[STREAM][delta]", {"len": len(part), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
+                                    print("[STREAM][delta]", {"len": len(part), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
                                     yield {
                                         "type": "delta",
                                         "role": "assistant",
@@ -365,7 +365,7 @@ async def stream_agent_response(
                             if text:
                                 emitted_any = True
                                 if sink == "agent_langgraph":
-                                    #print("[STREAM][message]", {"len": len(text), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
+                                    print("[STREAM][message]", {"len": len(text), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
                                     yield {
                                         "type": "message",
                                         "role": "assistant",
@@ -394,7 +394,7 @@ async def stream_agent_response(
                         continue
                     if k in EMIT_STATE_KEYS:
                         val_preview = str(v)
-                        #print("[STREAM][state]", {"key": k, "val": val_preview[:120], "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
+                        print("[STREAM][state]", {"key": k, "val": val_preview[:120], "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
                         yield {
                             "type": "state",
                             "key": k,
@@ -409,7 +409,7 @@ async def stream_agent_response(
         if assembled:
             final_text = "".join(assembled).strip()
             if final_text and sink == "agent_langgraph":
-                #print("[STREAM][message]", {"len": len(final_text), "note": "flush", "sink": sink, "run_id": run_id}, flush=True)
+                print("[STREAM][message]", {"len": len(final_text), "note": "flush", "sink": sink, "run_id": run_id}, flush=True)
                 yield {
                     "type": "message",
                     "role": "assistant",
@@ -421,7 +421,7 @@ async def stream_agent_response(
             assembled.clear()
 
         if not emitted_any:
-            #print("[STREAM][message]", {"len": 0, "note": "no assistant message", "sink": sink, "run_id": run_id}, flush=True)
+            print("[STREAM][message]", {"len": 0, "note": "no assistant message", "sink": sink, "run_id": run_id}, flush=True)
             yield {
                 "type": "message",
                 "role": "system",
@@ -434,7 +434,7 @@ async def stream_agent_response(
     finally:
         if registered:
             await pb_unregister(tab_id)
-        #print("[STREAM][run_end]", {"sink": sink, "run_id": run_id, "tab_id": tab_id}, flush=True)
+        print("[STREAM][run_end]", {"sink": sink, "run_id": run_id, "tab_id": tab_id}, flush=True)
         yield {
             "type": "run_end",
             "tab_id": tab_id,

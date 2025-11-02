@@ -270,6 +270,25 @@ export function registerAgentLangGraphHandlers() {
             idx++; await tick(); continue;
           }
 
+          // ✅ NEW: capture topic updates as a chat row so the UI can show it
+          if (key === "topic") {
+            const text = String(rawValue ?? "").trim();
+            if (text) {
+              useCS25ChatStore.getState().addStatus(chatKey, {
+                text: `Topic: ${text}`,
+                at: Date.now(),
+                scope: "TOPIC",
+              });
+              orchestrator.sendToConsole(
+                "agent.state",
+                { payload: { key, value: text, sink: "agent_langgraph" } },
+                "Agent: topic update"
+              );
+            }
+            idx++; await tick(); continue;
+          }
+
+
           // Optional: log other state keys for a bit
           orchestrator.sendToConsole(
             "agent.state",

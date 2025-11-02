@@ -301,20 +301,8 @@ export default function ConsoleAiView() {
     orchestrator.receiveFromConsole(AGENT.STOP, { payload: { tabId, runId } });
   };
 
-  const activityItems: ActivityItemT[] = chatRows
-    .map((m, i) => {
-      if ((m as any).role === "topic") {
-        return {
-          id: `topic-${(m as any).at ?? i}`,
-          title: "Topic updated",
-          detail: m.content,
-          tone: "blue" as const,
-          ts: (m as any).at ?? Date.now(),
-        };
-      }
-      return null;
-    })
-    .filter(Boolean) as ActivityItemT[];
+  // Do not show topic in the AI Activity panel; it will appear as a tick in the chat stream.
+  const activityItems: ActivityItemT[] = [];
 
   return (
     <div className="flex flex-col gap-3 p-3 text-sm">
