@@ -1,0 +1,32 @@
+# docker-compose.yml
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: ./Dockerfile.frontend
+    depends_on: [backend]
+    networks: [appnet]
+    expose:
+      - "3000"
+
+  backend:
+    build:
+      context: ./backend
+    depends_on: [redis]
+    networks: [appnet]
+    expose:
+      - "8000"
+
+  redis:
+    image: redis/redis-stack:latest
+    networks: [appnet]
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+
+networks:
+  appnet:
+
+volumes:
+  redis_data:

@@ -1,6 +1,9 @@
 // src/stores/console-store.ts
 "use client";
 
+import { useCS25ChatStore } from "@/app/(protected)/system-b/browse-cert-specs-V4/stores/chat-store";
+import { useCS25TraceStore } from "@/app/(protected)/system-b/browse-cert-specs-V4/stores/cs25-trace-store";
+
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { logAction, logSystem, logWarn } from "@/lib/logger";
@@ -330,6 +333,30 @@ export const useConsoleStore = create<ConsoleState>()(
               }
             } catch {}
 
+            // ✅ clear page-scoped chat for this route/tab
+            try {
+              if (route) {
+                const key = `${route}::${tabId}`;
+                useCS25ChatStore.getState().clearKey(key);
+              } else {
+                // fallback: purge any keys ending with ::tabId
+                useCS25ChatStore.getState().clearByTabId(tabId);
+              }
+            } catch {}
+
+            // ✅ traces
+            try {
+               if (route) {
+                 // preferred: route-scoped clear
+                 useCS25TraceStore.getState().clear(route, tabId);
+               } else {
+                 // optional helper if you added it; safe-guarded
+                 useCS25TraceStore.getState().clearByTabId?.(tabId);
+               }
+            } catch {}
+            // close the session when close tab but agent is still streaming
+            try { orchestrator?.deliver?.({ from: "console", to: "orchestrator", channel: "agent.run.stop", payload: { tabId } }); } catch {}
+
             // drop chat data for this tab
             const { [tabId]: _m, ...restMsgs } = s.aiMessages ?? {};
             const { [tabId]: _d, ...restDrafts } = s.aiDrafts ?? {};
@@ -375,6 +402,29 @@ export const useConsoleStore = create<ConsoleState>()(
                   usePageConfigStore.getState().clearConfig(route, tabId);
                 } else {
                   usePageConfigStore.getState().clearByTabId?.(tabId);
+                }
+              } catch {}
+
+
+              // ✅ clear page-scoped chat for this route/tab
+              try {
+                  if (route) {
+                    const key = `${route}::${tabId}`;
+                    useCS25ChatStore.getState().clearKey(key);
+                  } else {
+                    // fallback: purge any keys ending with ::tabId
+                    useCS25ChatStore.getState().clearByTabId(tabId);
+                  }
+              } catch {}
+              // close the session when close tab but agent is still streaming
+              try { orchestrator?.deliver?.({ from: "console", to: "orchestrator", channel: "agent.run.stop", payload: { tabId } }); } catch {}
+
+              // ✅ traces
+              try {
+                if (route) {
+                  useCS25TraceStore.getState().clear(route, tabId);
+                } else {
+                  useCS25TraceStore.getState().clearByTabId?.(tabId);
                 }
               } catch {}
 

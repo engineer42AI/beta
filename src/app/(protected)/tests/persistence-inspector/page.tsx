@@ -9,6 +9,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useConsoleStore } from '@/stores/console-store';
 import { usePageConfigStore } from '@/stores/pageConfig-store';
 
+import { HandlersPanel } from "@/lib/debug/orchestratorInspector";
+
+// 👇 ADD: trace store import so we can clear in-memory state too
+import { useCS25TraceStore } from '@/app/(protected)/system-b/browse-cert-specs-V4/stores/cs25-trace-store';
+
 /** ---------- Types ---------- */
 type LSItem = { key: string; size: number; raw: string | null; parsed?: any };
 
@@ -72,6 +77,20 @@ export default function PersistenceInspectorPage() {
     setTs(new Date().toISOString());
     lastFpRef.current = fingerprintLocalStorage();
   }, []);
+
+  // 👇 ADD: one-click nuke for the trace store
+  const nukeTraceStore = useCallback(() => {
+    if (!confirm('Delete ALL trace data (cs25-trace-v1) from memory and localStorage?')) return;
+    try {
+      // clear in-memory Zustand state (so UI reflects immediately)
+      useCS25TraceStore.setState({ byKey: {} });
+    } catch {}
+    try {
+      // clear persisted blob
+      localStorage.removeItem('cs25-trace-v1');
+    } catch {}
+    refreshLocal();
+  }, [refreshLocal]);
 
   useEffect(() => { refreshLocal(); }, [refreshLocal]);
 
@@ -155,6 +174,23 @@ export default function PersistenceInspectorPage() {
           </div>
         </div>
       </header>
+
+      {/* 👇 ADD: Quick actions */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <SectionHeader label="Quick actions" subtitle="One-click maintenance utilities" />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={nukeTraceStore}
+              title="Clear cs25-trace-v1 (both memory and localStorage)"
+            >
+              Nuke Traces (cs25-trace-v1)
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       <section className="space-y-4">
         {/* ---- Live Bindings (read-only) ---- */}
@@ -251,6 +287,17 @@ export default function PersistenceInspectorPage() {
           ))}
         </Card>
       </section>
+
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <SectionHeader
+            label="Handlers (live)"
+            subtitle="orchestrator registry • totals, duplicates, recent activity"
+          />
+        </div>
+        <HandlersPanel />
+      </Card>
+
     </div>
   );
 }

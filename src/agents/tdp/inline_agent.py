@@ -23,7 +23,7 @@ class InlineInputs(BaseModel):
     tdp_markdown: Optional[str] = None
 
 class InlineWorkflowAgent:
-    """Inline panel agent for section guidance, SMART-ify, assumptions, and linting."""
+    """Inline panel agent_langgraph for section guidance, SMART-ify, assumptions, and linting."""
 
     def __init__(self, model: str = "gpt-4o-mini"):
         self.model = model

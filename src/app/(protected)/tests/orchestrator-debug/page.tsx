@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, Clock } from "lucide-react";
 import JsonViewer from "@/components/dev/JsonViewer";
 import { WF } from "@/app/(protected)/system-b/browse-cert-specs-V4/outline.handlers";
+import { AGENT_WF } from "@/app/(protected)/system-b/browse-cert-specs-V4/agent_langgraph.handlers";  // <-- add
 
 /* ── role text colors (no row fills) ───────────────────────────── */
 const roleColor: Record<WireEntry["from"] | WireEntry["to"], string> = {
@@ -36,9 +37,12 @@ function getStep(e: WireEntry): number | undefined {
 
 /* ── workflow trigger: start a group on workflow 'started' ─────── */
 function isWorkflowStart(e: WireEntry): boolean {
-  if (e.channel !== WF.OUTLINE_LOAD) return false;
-  const ev = getEvent(e);
-  return ev === "initialRequest" || ev === "started";
+  const ev = e?.metadata?.event as string | undefined;
+  // include 'user_query' as a starter (first thing agent handler emits)
+  const isStarter = ev === "initialRequest" || ev === "started" || ev === "user_query";
+  if (!isStarter) return false;
+  // accept both outline and agent workflows
+  return e.channel === WF.OUTLINE_LOAD || e.channel === AGENT_WF.RUN;
 }
 
 /* ── status helpers ─────────────────────────────────────────────── */
@@ -177,6 +181,53 @@ function ColumnFilter({
   );
 }
 
+type GroupedItem =
+  | { type: "single"; entry: WireEntry }
+  | {
+      type: "group";
+      signature: { from: string; to: string; channel: string; label: string };
+      entries: WireEntry[];
+    };
+
+function groupSimilarRows(rows: WireEntry[], minGroupSize = 4): GroupedItem[] {
+  const result: GroupedItem[] = [];
+  let buffer: WireEntry[] = [];
+
+  const flush = () => {
+    if (buffer.length >= minGroupSize) {
+      const ref = buffer[0];
+      result.push({
+        type: "group",
+        signature: {
+          from: ref.from,
+          to: ref.to,
+          channel: ref.channel,
+          label: ref.label,
+        },
+        entries: [...buffer],
+      });
+    } else {
+      result.push(...buffer.map((e) => ({ type: "single", entry: e })));
+    }
+    buffer = [];
+  };
+
+  for (const e of rows) {
+    if (
+      buffer.length > 0 &&
+      (buffer[0].from !== e.from ||
+        buffer[0].to !== e.to ||
+        buffer[0].channel !== e.channel ||
+        buffer[0].label !== e.label)
+    ) {
+      flush();
+    }
+    buffer.push(e);
+  }
+  flush();
+  return result;
+}
+
 export default function OrchestratorWire() {
   const [wire, setWire] = useState<WireEntry[]>(orchestrator.getWire?.() ?? []);
   const [state, setState] = useState<OrchestratorPublicState | null>(orchestrator.getState?.() ?? null);
@@ -287,49 +338,127 @@ export default function OrchestratorWire() {
 
                 {/* group rows (chronological inside the group) */}
                 <div className="max-h-[60vh] overflow-auto">
-                  {g.rows.map((e) => {
-                    const st = rowStatusText(e);
-                    return (
-                      <details key={e.id} className="border-b">
-                        <summary className="list-none grid grid-cols-[110px_80px_110px_110px_200px_1fr_240px_120px_140px] items-start gap-0 px-3 py-2 cursor-pointer">
-                          {/* time */}
-                          <div className="font-mono tabular-nums text-[11px] text-muted-foreground pr-3">
-                            {new Date(e.ts).toLocaleTimeString()}
+                  {groupSimilarRows(g.rows).map((item, idx) => {
+                    if (item.type === "single") {
+                      const e = item.entry;
+                      const st = rowStatusText(e);
+                      return (
+                        <details key={e.id} className="border-b">
+                          <summary className="list-none grid grid-cols-[110px_80px_110px_110px_200px_1fr_240px_120px_140px] items-start gap-0 px-3 py-2 cursor-pointer">
+                            <div className="font-mono tabular-nums text-[11px] text-muted-foreground pr-3">
+                              {new Date(e.ts).toLocaleTimeString()}
+                            </div>
+                            <div className={cn("font-mono text-[11px]", statusClass(st))}>{st || "—"}</div>
+                            <div className={cn("font-mono text-[11px]", roleColor[e.from])}>{e.from}</div>
+                            <div className={cn("font-mono text-[11px]", roleColor[e.to])}>{e.to}</div>
+                            <div className="font-mono text-[11px]">{e.channel}</div>
+                            <div className="truncate text-[11px]">{e.label}</div>
+                            <div className="truncate text-muted-foreground text-[11px]">{e.route ?? "—"}</div>
+                            <div className="font-mono text-muted-foreground text-[11px]">{e.pageId?.slice(0, 8) ?? "—"}</div>
+                            <div className="font-mono text-muted-foreground text-[11px]">{e.tabId ?? "—"}</div>
+                          </summary>
+                          <div className="px-3 pb-3 space-y-2">
+                            {typeof e.payload !== "undefined" && (
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Payload</div>
+                                <JsonViewer value={e.payload} defaultOpen={1} className="p-2" />
+                              </div>
+                            )}
+                            {typeof e.metadata !== "undefined" && (
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Metadata</div>
+                                <JsonViewer value={e.metadata} defaultOpen={1} className="p-2" />
+                              </div>
+                            )}
+                            {typeof e.payload === "undefined" && typeof e.metadata === "undefined" && (
+                              <div className="text-xs text-muted-foreground">No payload or metadata.</div>
+                            )}
                           </div>
-                          {/* status */}
-                          <div className={cn("font-mono text-[11px]", statusClass(st))}>{st || "—"}</div>
-                          {/* from / to */}
-                          <div className={cn("font-mono text-[11px]", roleColor[e.from])}>{e.from}</div>
-                          <div className={cn("font-mono text-[11px]", roleColor[e.to])}>{e.to}</div>
-                          {/* channel / label */}
-                          <div className="font-mono text-[11px]">{e.channel}</div>
-                          <div className="truncate  text-[11px]">{e.label}</div>
-                          {/* route/page/tab */}
-                          <div className="truncate text-muted-foreground text-[11px]">{e.route ?? "—"}</div>
-                          <div className="font-mono text-muted-foreground text-[11px]">{e.pageId?.slice(0, 8) ?? "—"}</div>
-                          <div className="font-mono text-muted-foreground text-[11px]">{e.tabId ?? "—"}</div>
-                        </summary>
+                        </details>
+                      );
+                    } else {
+                      // Collapsed group of repeated rows
+                      return (
+                        /* ── Collapsed group of repeated rows (same columns as main table) ───────── */
+                        <details key={`grp-${idx}`} className="border-b">
+                          <summary className="list-none px-3 py-2 cursor-pointer bg-muted/20 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[11px] text-muted-foreground">
+                                {item.entries.length} repeated
+                              </span>
+                              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                                {item.signature.channel}
+                              </Badge>
+                              <span className="text-[11px] text-muted-foreground">({item.signature.label})</span>
+                            </div>
+                            <div className="text-xs text-muted-foreground">Click to expand & inspect individual payloads</div>
+                          </summary>
 
-                        {/* payload + metadata inspectors */}
-                        <div className="px-3 pb-3 space-y-2">
-                          {typeof e.payload !== "undefined" && (
-                            <div>
-                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Payload</div>
-                              <JsonViewer value={e.payload} defaultOpen={1} className="p-2" />
-                            </div>
-                          )}
-                          {typeof e.metadata !== "undefined" && (
-                            <div>
-                              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Metadata</div>
-                              <JsonViewer value={e.metadata} defaultOpen={1} className="p-2" />
-                            </div>
-                          )}
-                          {typeof e.payload === "undefined" && typeof e.metadata === "undefined" && (
-                            <div className="text-xs text-muted-foreground">No payload or metadata.</div>
-                          )}
-                        </div>
-                      </details>
-                    );
+                          {/* sub-table header (same grid as parent) */}
+                          <div className="grid grid-cols-[110px_80px_110px_110px_200px_1fr_240px_120px_140px] items-center gap-0 border-y bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                            <div>Time</div>
+                            <div>Status</div>
+                            <div>From</div>
+                            <div>To</div>
+                            <div>Channel</div>
+                            <div>Label</div>
+                            <div>Route</div>
+                            <div>Page</div>
+                            <div>Tab</div>
+                          </div>
+
+                          {/* sub-table rows (each row expandable for payload/metadata) */}
+                          <div>
+                            {item.entries.map((e) => {
+                              const st = rowStatusText(e);
+                              return (
+                                <details key={e.id} className="border-b">
+                                  <summary className="list-none grid grid-cols-[110px_80px_110px_110px_200px_1fr_240px_120px_140px] items-start gap-0 px-3 py-2 cursor-pointer">
+                                    {/* time */}
+                                    <div className="font-mono tabular-nums text-[11px] text-muted-foreground pr-3">
+                                      {new Date(e.ts).toLocaleTimeString()}
+                                    </div>
+                                    {/* status */}
+                                    <div className={cn("font-mono text-[11px]", statusClass(st))}>{st || "—"}</div>
+                                    {/* from / to */}
+                                    <div className={cn("font-mono text-[11px]", roleColor[e.from])}>{e.from}</div>
+                                    <div className={cn("font-mono text-[11px]", roleColor[e.to])}>{e.to}</div>
+                                    {/* channel / label */}
+                                    <div className="font-mono text-[11px]">{e.channel}</div>
+                                    <div className="truncate text-[11px]">{e.label}</div>
+                                    {/* route/page/tab */}
+                                    <div className="truncate text-muted-foreground text-[11px]">{e.route ?? "—"}</div>
+                                    <div className="font-mono text-muted-foreground text-[11px]">
+                                      {e.pageId?.slice(0, 8) ?? "—"}
+                                    </div>
+                                    <div className="font-mono text-muted-foreground text-[11px]">{e.tabId ?? "—"}</div>
+                                  </summary>
+
+                                  {/* payload + metadata for this row */}
+                                  <div className="px-3 pb-3 space-y-2">
+                                    {typeof e.payload !== "undefined" && (
+                                      <div>
+                                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Payload</div>
+                                        <JsonViewer value={e.payload} defaultOpen={0} className="p-2" />
+                                      </div>
+                                    )}
+                                    {typeof e.metadata !== "undefined" && (
+                                      <div>
+                                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Metadata</div>
+                                        <JsonViewer value={e.metadata} defaultOpen={0} className="p-2" />
+                                      </div>
+                                    )}
+                                    {typeof e.payload === "undefined" && typeof e.metadata === "undefined" && (
+                                      <div className="text-xs text-muted-foreground">No payload or metadata.</div>
+                                    )}
+                                  </div>
+                                </details>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      );
+                    }
                   })}
                 </div>
               </details>

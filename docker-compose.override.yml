@@ -1,0 +1,17 @@
+# docker-compose.override.yml
+services:
+  frontend:
+    env_file: [.env.local]
+    ports:
+      - "3000:3000"
+
+  backend:
+    env_file: [.env.local]
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+
+  redis:
+    ports:
+      - "6379:6379"

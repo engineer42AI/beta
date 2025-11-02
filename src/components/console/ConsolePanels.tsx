@@ -21,12 +21,23 @@ export default function ConsolePanels({ children }: { children: React.ReactNode 
   const { open, consoleSize, setConsoleSize } = useConsoleStore();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  if (!mounted) return <div className="h-full" />;
+  //if (!mounted) return <div className="h-full" />;
+  if (!mounted) return <div className="h-full min-h-0 overflow-hidden" />;
+
 
   return (
+    //<ResizablePanels
+    //  direction="vertical"
+    //  className="h-full min-h-0 overflow-hidden"
+    //  onLayout={(sizes) => {
+    //    if (!open) return;
+    //    const s = Math.round(sizes[1] ?? 0);
+    //    if (s >= 20 && s <= 70) setConsoleSize(s);
+    //  }}
+    //>
     <ResizablePanels
       direction="vertical"
-      className="h-full"
+      className="h-full console-debug-border"
       onLayout={(sizes) => {
         if (!open) return;
         const s = Math.round(sizes[1] ?? 0);
@@ -43,27 +54,36 @@ export default function ConsolePanels({ children }: { children: React.ReactNode 
       </Panel>
 
       {open ? (
-        <PanelResizeHandle id="console-edge" className="h-3 cursor-row-resize" />
+        //<PanelResizeHandle id="console-edge" className="h-3 cursor-row-resize" />
+        <PanelResizeHandle
+           id="console-edge"
+           className="h-3 cursor-row-resize border-t-4 border-black-500"
+           //className="h-3 cursor-row-resize outline outline-4 outline-yellow-500"
+         />
       ) : (
         <div className="h-0" />
       )}
 
       {open ? (
-        <Panel
-          key="console-open"
-          defaultSize={consoleSize}
-          minSize={20}
-          maxSize={70}
-          collapsedSize={0}
-          collapsible
-        >
-          <div className="h-full min-h-0 overflow-hidden">
-            <BottomConsole />
-          </div>
-        </Panel>
-      ) : (
+          <Panel
+            key="console-open"
+            defaultSize={consoleSize}
+            minSize={20}
+            maxSize={70}
+            collapsedSize={0}
+            collapsible
+          >
+            <div className="h-full min-h-0 overflow-hidden">
+              <div className="h-full rounded-md">
+                <BottomConsole />
+              </div>
+            </div>
+          </Panel>
+        ) : (
         <Panel key="console-closed" defaultSize={6} minSize={6} maxSize={6}>
-          <ConsoleBar id="console-edge" />
+          <div className="h-full rounded-md">
+            <ConsoleBar id="console-edge" />
+          </div>
         </Panel>
       )}
     </ResizablePanels>

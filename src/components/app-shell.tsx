@@ -17,11 +17,14 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
+import * as Dialog from "@radix-ui/react-dialog";
+
 import {
   Home, Network, FileText, Settings, Menu, Users,
   ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { type LucideIcon } from "lucide-react";
+
 
 const ConsolePanels = dynamic(() => import("@/components/console/ConsolePanels"), {
   ssr: false,
@@ -184,6 +187,17 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
 
 /* --- AppShell --- */
 export default function AppShell({ children }: { children: React.ReactNode }) {
+
+  // DEV-ONLY: install inspector
+  useEffect(() => {
+      if (process.env.NODE_ENV === "production") return;
+      (async () => {
+        const { installOrchestratorInspector } = await import("@/lib/debug/orchestratorInspector");
+        const { orchestrator } = await import("@/lib/pageOrchestrator");
+        installOrchestratorInspector(orchestrator as any);
+      })();
+  }, []);
+
   const pathname = usePathname();
   const setContext = useConsoleStore(s => s.setContext);   // <— get the setter
 
@@ -196,9 +210,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const { data } = useUser();
   const authed = !!data?.authenticated;
-
+//debugging
+//
+    //<div className="grid grid-rows-[auto_1fr] min-h-dvh overflow-visible border-8 border-green-500">
+    //<div className="fixed inset-0 grid grid-rows-[auto_minmax(0,1fr)] overflow-visible border-8 border-green-500">
   return (
-    <div className="grid grid-rows-[auto_1fr] h-dvh">
+
+    <div className="grid grid-rows-[auto_minmax(0,1fr)] h-dvh overflow-hidden">
       {/* Header */}
       <header className="flex items-center gap-2 border-b px-3 h-12">
         <div className="md:hidden">
@@ -209,6 +227,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="p-0 w-60">
+              {/* Hidden but satisfies accessibility requirement */}
+              <Dialog.Title className="sr-only">Primary navigation</Dialog.Title>
               <div className="px-3 py-2 font-semibold">Engineer42</div>
               <Separator />
               <ScrollArea className="h-[calc(100dvh-3rem)] p-2">
@@ -240,7 +260,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="grid grid-cols-[auto_1fr] min-h-0">
         {/* Sidebar */}
         <aside
-          className={`hidden md:flex flex-col border-r transition-all duration-200 ${
+          className={`hidden md:flex min-h-0 overflow-auto flex-col border-r transition-all duration-200 ${
             collapsed ? "w-14" : "w-60"
           }`}
         >
@@ -250,7 +270,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </aside>
 
         {/* Right column with console */}
-        <div className="min-h-0 min-w-0 overflow-hidden">
+        <div className="min-h-0 min-w-0 h-full overflow-hidden col-span-full md:col-auto">
           <ConsolePanels>{children}</ConsolePanels>
         </div>
       </div>
