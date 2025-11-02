@@ -15,5 +15,10 @@ class AgentState(MessagesState):
     tab_id: str
     topic: Optional[str]
 
+    selection_count: int
+    relevance_count: int
+
     selections_frozen: bool
     selections_frozen_at: Optional[str]
+
+    system_status: Optional[str] = None  # NEW

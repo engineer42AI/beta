@@ -21,6 +21,9 @@ from io import StringIO
 from contextlib import redirect_stdout
 from typing import List
 from langchain_core.messages import BaseMessage
+
+
+
 def _filter_chat_only(msgs):
     return [m for m in msgs if isinstance(m, (HumanMessage, AIMessage, SystemMessage))]
 
@@ -147,7 +150,59 @@ import random
 from typing import Literal
 
 
-async def UI_decide_node(state: AgentState, store: BaseStore) -> Literal["main", "recommend"]:
+async def page_config_llm(state, store: BaseStore):
+    tab_id = state.get("tab_id") or ""
+    item = await store.aget(("cs25_context", tab_id), "latest")
+    ctx = getattr(item, "value", {}) if item else {}
+
+    selected_ids = ctx.get("selected_ids") or []
+    snapshot_rows = ctx.get("snapshotRows") or []
+    frozen = bool(ctx.get("selections_frozen"))
+    frozen_at = ctx.get("selections_frozen_at") or None
+
+    selection_count = len(selected_ids)
+    relevance_count = len(snapshot_rows)
+
+    # ✅ correctly access the latest message content
+    messages = state.get("messages", [])
+    latest_message = messages[-1].content.strip() if messages else ""
+
+    # Acknowledge freeze/unfreeze via system_status ONLY (no chat bubbles)
+    if latest_message == "__needs_freeze__":
+        status = (
+            f"🔒 Frozen context acknowledged • relevant={relevance_count}"
+            if frozen
+            else "🔒 Freeze requested, but context is not marked frozen in store."
+        )
+    elif latest_message == "__needs_unfreeze__":
+        status = (
+            "🔓 Unfrozen context acknowledged"
+            if not frozen
+            else "🔓 Unfreeze requested, but context is still marked frozen in store."
+        )
+    else:
+        # generic status when not a trigger
+        if not frozen and selection_count == 0:
+            status = "⚠️ No selections found. Select items or run a relevance scan."
+        elif frozen and relevance_count == 0:
+            status = "⚠️ Context is frozen but has 0 relevant entries. Unfreeze or rescan."
+        else:
+            status = (
+                f"Context: selections={selection_count}, relevant={relevance_count}, "
+                f"{'frozen' if frozen else 'editable'}"
+                + (f" (since {frozen_at})" if frozen and frozen_at else "")
+            )
+
+    return {
+        "selection_count": selection_count,
+        "relevance_count": relevance_count,
+        "selections_frozen": frozen,
+        "selections_frozen_at": frozen_at,
+        "system_status": status,
+    }
+
+
+async def UI_selections_decide_node(state: AgentState, store: BaseStore) -> Literal["with_selections", "no_selections"]:
 
     tab_id = state.get("tab_id", "") or ""
     # Async store read (requires graph compiled with an AsyncRedisStore)
@@ -156,11 +211,75 @@ async def UI_decide_node(state: AgentState, store: BaseStore) -> Literal["main",
     selected_ids = ctx.get("selected_ids", [])
     selected_count = len(selected_ids)
 
+
+
+
     if selected_count > 0:
-        return "main"
+        return "with_selections"
 
-    return "recommend"
+    return "no_selections"
 
+async def maybe_freeze_intro(state: AgentState, store: BaseStore):
+    tab_id = state.get("tab_id")
+    item = await store.aget(("cs25_context", tab_id), "latest")
+    ctx = item.value if item and hasattr(item, "value") else {}
+
+    frozen = bool(ctx.get("selections_frozen"))
+    rows = ctx.get("snapshotRows") or []
+    n = len(rows)
+
+    if frozen:
+        msg = f"✅ Context frozen with {n} relevant items. Proceeding with Needs Table analysis."
+    else:
+        msg = "🔓 Context is editable. Using current live selections."
+
+    return {"messages": [AIMessage(content=msg)]}
+
+
+def decide_node(state) -> Literal["outline", "needs", "end"]:
+    """Route execution to outline, needs, or end based on page config state."""
+
+    frozen = bool(state.get("selections_frozen"))
+    selection_count = int(state.get("selection_count") or 0)
+    relevance_count = int(state.get("relevance_count") or 0)
+
+    # 🧭 Decision logic:
+    # - Outline → unfrozen and has selections
+    # - Needs   → frozen and has relevance
+    # - Otherwise → END
+
+    if not frozen and selection_count > 0:
+        return "outline"
+    elif frozen and relevance_count > 0:
+        return "needs"
+    else:
+        return "end"
+
+async def UI_freeze_decide_node(state: AgentState, store: BaseStore) -> Literal["frozen", "not_frozen"]:
+
+    tab_id = state.get("tab_id", "") or ""
+    # Async store read (requires graph compiled with an AsyncRedisStore)
+    item = await store.aget(("cs25_context", tab_id), "latest")
+    ctx = item.value if item and hasattr(item, "value") else {}
+    if not isinstance(ctx, dict):
+        ctx = {}
+
+    frozen = bool(ctx.get("selections_frozen"))
+
+    if frozen:
+        return "frozen"
+
+    return "not_frozen"
+
+
+async def should_run_node(state: AgentState, store: BaseStore) -> Literal["yes", "no"]:
+
+    latest_message = state["messages"][-1]
+    print(f"LATEST MESSAGE -----> {latest_message}")
+    if latest_message == "__needs_freeze__" or "__needs_unfreeze__":
+        return "no"
+
+    return "yes"
 
 
 async def recommend_sections_llm(
@@ -255,7 +374,6 @@ TOPIC:
 HISTORY:
 {message_history}
 """
-
 
     return {"messages": [llm.invoke(prompt_for_llm)]}
 

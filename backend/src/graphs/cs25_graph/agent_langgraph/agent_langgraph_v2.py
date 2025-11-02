@@ -2,6 +2,8 @@
 
 from dotenv import load_dotenv, find_dotenv
 import os
+import uuid
+
 # ---- env / client -----------------------------------------------------------
 load_dotenv(find_dotenv(".env"))  # finds .env anywhere up the tree
 api_key = os.getenv("OPENAI_API_KEY")
@@ -21,7 +23,7 @@ from src.graphs.cs25_graph.agent_langgraph.utils.tools.recommend_sections_tool i
 from src.graphs.cs25_graph.agent_langgraph.utils.tools.think_tool import think_tool
 from src.graphs.cs25_graph.agent_langgraph.utils.nodes.find_relevant_sections import find_relevant_sections_llm
 
-from src.graphs.cs25_graph.agent_langgraph.utils.nodes.nodes import tool_calling_llm, UI_decide_node, recommend_sections_llm, topic_llm
+from src.graphs.cs25_graph.agent_langgraph.utils.nodes.nodes import tool_calling_llm, UI_selections_decide_node, recommend_sections_llm, topic_llm, maybe_freeze_intro, UI_freeze_decide_node, should_run_node, page_config_llm, decide_node
 from src.graphs.cs25_graph.agent_langgraph.utils.state import AgentState
 from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 from langgraph.store.redis.aio import AsyncRedisStore
@@ -66,6 +68,10 @@ async def build_agent_graph():
 
     builder = StateGraph(AgentState)
 
+    builder.add_node("page_config_llm", page_config_llm)
+    builder.add_node("maybe_freeze_intro", maybe_freeze_intro)
+    builder.add_node("should_run_node", should_run_node)
+
     builder.add_node("topic_llm", topic_llm)
     builder.add_node("recommend_sections_llm", recommend_sections_llm)
     #builder.add_node("tool_calling_llm", tool_calling_llm)
@@ -75,13 +81,39 @@ async def build_agent_graph():
     #builder.add_node("tools_main", ToolNode(tools_for_tool_calling_llm))
 
     # Start → topic
-    builder.add_edge(START, "topic_llm")
+    builder.add_edge(START, "page_config_llm")
+
+    builder.add_conditional_edges("page_config_llm", decide_node, {
+        "outline": "topic_llm",
+        "needs": "maybe_freeze_intro",
+        "end": END,
+    })
+
+
+
+    builder.add_edge("topic_llm", "find_relevant_sections_llm")
+    builder.add_edge("find_relevant_sections_llm", END)
+
+    builder.add_edge("maybe_freeze_intro", END)
+
+    # freeze → decide
+    #builder.add_conditional_edges(START, UI_freeze_decide_node, {
+    #    "frozen": "maybe_freeze_intro",
+    #    "not_frozen": "topic_llm",
+    #})
+
 
     # topic → decide (should return 'recommend' or 'main', etc.)
-    builder.add_conditional_edges("topic_llm", UI_decide_node, {
-        "recommend": "recommend_sections_llm",
-        "main": "find_relevant_sections_llm",
-    })
+    #builder.add_conditional_edges("topic_llm", UI_selections_decide_node, {
+    #    "no_selections": "recommend_sections_llm",
+    #    "with_selections": "find_relevant_sections_llm",
+    #})
+
+    # run selection scan → decide
+    #builder.add_conditional_edges("should_run_node", should_run_node, {
+    #    "yes": "find_relevant_sections_llm",
+    #    "no": END,
+    #})
 
     # ReAct loop for recommend Sections
     #=builder.add_conditional_edges("recommend_sections_llm", tools_condition, {
@@ -91,8 +123,9 @@ async def build_agent_graph():
     #    "__end__": END,  # add for compatibility with older returns
     #})
     #builder.add_edge("tools_recommend", "recommend_sections_llm")  # loop back
-    builder.add_edge("recommend_sections_llm", END)
-    builder.add_edge("find_relevant_sections_llm", END)
+    #builder.add_edge("maybe_freeze_intro", END)
+    #builder.add_edge("recommend_sections_llm", END)
+    #builder.add_edge("find_relevant_sections_llm", END)
 
     # ReAct loop for main tool-calling LLM
     #builder.add_conditional_edges("tool_calling_llm", tools_condition, {
@@ -183,7 +216,14 @@ async def upsert_tab_context(store, tab_id: str, new_ctx: Dict[str, Any]) -> Dic
 
 
 # ✅ Only these state keys will be emitted to the frontend as {"type":"state", "key":..., "value":...}
-EMIT_STATE_KEYS: set[str] = {"topic"}  # add more keys from AgentState as you introduce them
+EMIT_STATE_KEYS: set[str] = {
+    "topic",
+    "system_status",         # NEW
+    "selection_count",
+    "relevance_count",
+    "selections_frozen",
+    "selections_frozen_at",
+}  # add more keys from AgentState as you introduce them
 
 async def stream_agent_response(
     tab_id: str,
@@ -194,36 +234,60 @@ async def stream_agent_response(
     graph = await get_agent_graph()
     store = await get_store()
 
-    # merge context (selected_ids, frozen flags, snapshotRows, etc.) into Redis
+    # --- merge tab context BUT do not persist 'sink' -------------------------
     if context:
-        merged_ctx = await upsert_tab_context(store, tab_id, context)
+        ctx_to_store = dict(context)
+        ctx_to_store.pop("sink", None)               # <- don't persist sink
+        merged_ctx = await upsert_tab_context(store, tab_id, ctx_to_store)
     else:
         merged_ctx = await store.aget(("cs25_context", tab_id), "latest") or {}
 
-    config = {"configurable": {"thread_id": tab_id}}
-    yield {"type": "run_start", "tab_id": tab_id}
+    # --- decide sink (keep agent_langgraph as the "chat" owner) --------------
+    sink_raw = (context or {}).get("sink")
+    sink = sink_raw if sink_raw else ("needs" if str(query or "").startswith("__needs_") else "agent_langgraph")
+    if sink_raw:
+        sink = sink_raw
+    else:
+        sink = "needs" if str(query or "").startswith("__needs_") else "agent_langgraph"
 
-    # Local queue for this HTTP stream
+    run_id = uuid.uuid4().hex
+
+    config = {"configurable": {"thread_id": tab_id}}
+
+    # Tell FE which sink/run this stream belongs to
+    yield {
+        "type": "run_start",
+        "tab_id": tab_id,
+        "sink": sink,
+        "run_id": run_id,
+        "source": "graph",
+    }
+
+    # Local queue for progress bus events
     progress_q: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
 
-    # Emitter function registered in the bus; nodes call progress_bus.emit(tab_id, evt)
+    # Only AGENT runs listen to the bus to avoid relays
+    listen_to_progress = (sink == "agent_langgraph")
+
     async def _emit(evt: Dict[str, Any]) -> None:
+        # Nodes emit into the bus → forward to this run
         if "tab_id" not in evt:
             evt = {"tab_id": tab_id, **evt}
         if "type" not in evt:
             evt = {"type": "analysis.progress", **evt}
-        await progress_q.put(evt)
+        # Tag with sink + run_id so FE can filter
+        await progress_q.put({**evt, "sink": sink, "run_id": run_id})
 
-    # Register this run's emitter; unregister on any exit path
-    await pb_register(tab_id, _emit)
+    registered = False
+    if listen_to_progress:
+        await pb_register(tab_id, _emit)
+        registered = True
 
     init_state = {
         "messages": [{"role": "user", "content": query}],
         "tab_id": tab_id,
         "selections_frozen": merged_ctx.get("selections_frozen"),
         "selections_frozen_at": merged_ctx.get("selections_frozen_at"),
-
-        # ❌ do not place functions (emit) in state
     }
 
     assembled: list[str] = []
@@ -237,34 +301,54 @@ async def stream_agent_response(
     try:
         async for source, payload in merged_iter:
             if source == "progress":
-                # already NDJSON-friendly
-                yield payload or {}
+                # debug: forwarded progress event from the bus
+                #print("[STREAM][progress]", {"sink": sink, "run_id": run_id, "tab_id": tab_id, "keys": list((payload or {}).keys())}, flush=True)
+                yield {"source": "progress", **(payload or {})}
                 continue
 
-            # LangGraph updates (unchanged)
             update = payload or {}
             for node_name, delta in update.items():
                 if not isinstance(delta, dict):
                     continue
 
+                # --- messages (AIMessageChunk / AIMessage / ToolMessage) ---
                 if "messages" in delta and delta["messages"]:
                     for m in delta["messages"]:
+
                         if isinstance(m, AIMessageChunk):
                             part = m.content or ""
                             if part:
                                 emitted_any = True
-                                assembled.append(part)
-                                yield {"type": "delta", "role": "assistant", "content": part}
+                                if sink == "agent_langgraph":  # stream only for agent_langgraph
+                                    assembled.append(part)
+                                    #print("[STREAM][delta]", {"len": len(part), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
+                                    yield {
+                                        "type": "delta",
+                                        "role": "assistant",
+                                        "content": part,
+                                        "source": "graph",
+                                        "sink": sink,
+                                        "run_id": run_id,
+                                    }
                             fin = getattr(m, "response_metadata", {}) or {}
                             if fin.get("finish_reason") in {"stop", "length", "tool_calls"}:
                                 final = "".join(assembled).strip()
-                                if final:
-                                    yield {"type": "message", "role": "assistant", "content": final}
+                                if final and sink == "agent_langgraph":
+                                    #print("[STREAM][message]", {"len": len(final), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
+                                    yield {
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": final,
+                                        "source": "graph",
+                                        "sink": sink,
+                                        "run_id": run_id,
+                                    }
                                 assembled.clear()
 
                         elif isinstance(m, AIMessage):
                             text = (m.content or "").strip()
                             tool_calls = getattr(m, "tool_calls", None)
+
                             if tool_calls:
                                 for tc in tool_calls:
                                     yield {
@@ -273,38 +357,89 @@ async def stream_agent_response(
                                         "args": tc.get("args", {}),
                                         "tool_call_id": tc.get("id"),
                                         "node": node_name,
+                                        "source": "graph",
+                                        "sink": sink,
+                                        "run_id": run_id,
                                     }
+
                             if text:
                                 emitted_any = True
-                                yield {"type": "message", "role": "assistant", "content": text}
+                                if sink == "agent_langgraph":
+                                    #print("[STREAM][message]", {"len": len(text), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
+                                    yield {
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": text,
+                                        "source": "graph",
+                                        "sink": sink,
+                                        "run_id": run_id,
+                                    }
 
                         elif isinstance(m, ToolMessage):
+                            #print("[STREAM][tool_result]", {"name": getattr(m, "name", None), "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
                             yield {
                                 "type": "tool_result",
                                 "name": getattr(m, "name", None),
                                 "tool_call_id": getattr(m, "tool_call_id", None),
                                 "content": m.content,
                                 "node": node_name,
+                                "source": "graph",
+                                "sink": sink,
+                                "run_id": run_id,
                             }
 
+                # --- state deltas (emit to both sinks) ----------------------
                 for k, v in delta.items():
                     if k == "messages":
                         continue
                     if k in EMIT_STATE_KEYS:
-                        yield {"type": "state", "key": k, "value": v, "node": node_name}
+                        val_preview = str(v)
+                        #print("[STREAM][state]", {"key": k, "val": val_preview[:120], "node": node_name, "sink": sink, "run_id": run_id}, flush=True)
+                        yield {
+                            "type": "state",
+                            "key": k,
+                            "value": v,
+                            "node": node_name,
+                            "source": "graph",
+                            "sink": sink,
+                            "run_id": run_id,
+                        }
 
         # trailing flush
         if assembled:
             final_text = "".join(assembled).strip()
-            if final_text:
-                yield {"type": "message", "role": "assistant", "content": final_text}
+            if final_text and sink == "agent_langgraph":
+                #print("[STREAM][message]", {"len": len(final_text), "note": "flush", "sink": sink, "run_id": run_id}, flush=True)
+                yield {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": final_text,
+                    "source": "graph",
+                    "sink": sink,
+                    "run_id": run_id,
+                }
             assembled.clear()
 
         if not emitted_any:
-            yield {"type": "message", "role": "system", "content": "No assistant message was emitted by the graph."}
-    finally:
-        # always unregister so nodes stop emitting into a dead stream
-        await pb_unregister(tab_id)
-        yield {"type": "run_end", "tab_id": tab_id}
+            #print("[STREAM][message]", {"len": 0, "note": "no assistant message", "sink": sink, "run_id": run_id}, flush=True)
+            yield {
+                "type": "message",
+                "role": "system",
+                "content": "No assistant message was emitted by the graph.",
+                "source": "graph",
+                "sink": sink,
+                "run_id": run_id,
+            }
 
+    finally:
+        if registered:
+            await pb_unregister(tab_id)
+        #print("[STREAM][run_end]", {"sink": sink, "run_id": run_id, "tab_id": tab_id}, flush=True)
+        yield {
+            "type": "run_end",
+            "tab_id": tab_id,
+            "source": "graph",
+            "sink": sink,
+            "run_id": run_id,
+        }
 
