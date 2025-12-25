@@ -569,17 +569,58 @@ function DrawerBody({ data }: { data: ResolvedPayload | null }) {
 
 function StatPills({ s }: { s?: NodeStats }) {
   if (!s) return null;
+
   return (
-    <div className="ml-auto flex items-center gap-1 w-[96px] justify-end" aria-label="section stats">
-      <Badge variant="outline" className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center">
-        <span className="tabular-nums">{s.total}</span>
-      </Badge>
-      <Badge className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center bg-emerald-600 text-white">
-        <span className="tabular-nums">{s.relevant}</span>
-      </Badge>
-      <Badge variant="destructive" className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center">
-        <span className="tabular-nums">{s.notRelevant}</span>
-      </Badge>
+    <div
+      className="ml-auto flex items-center gap-1 w-[96px] justify-end"
+      aria-label="section stats"
+    >
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Badge
+                variant="outline"
+                className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center"
+              >
+                <span className="tabular-nums">{s.total}</span>
+              </Badge>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            Total
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Badge className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center bg-emerald-600 text-white">
+                <span className="tabular-nums">{s.relevant}</span>
+              </Badge>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            Included
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Badge
+                variant="destructive"
+                className="h-6 min-w-6 px-2 rounded-full flex items-center justify-center"
+              >
+                <span className="tabular-nums">{s.notRelevant}</span>
+              </Badge>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            Excluded
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   );
 }

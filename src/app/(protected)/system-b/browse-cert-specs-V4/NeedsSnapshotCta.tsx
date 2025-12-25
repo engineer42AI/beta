@@ -38,19 +38,17 @@ export function NeedsSnapshotCta({
 
       <div className="space-y-1">
         <div className="text-base font-semibold text-foreground">
-          Freeze Needs from CS-25
+          Decide
         </div>
         <div className="text-[13px] leading-5 text-muted-foreground max-w-[42ch] mx-auto">
-          You’re reviewing which CS-25 clauses are relevant to your system.
-          When you’re confident, capture them here and we’ll generate a
-          “Needs” snapshot for requirements work.
+          Use the current set as the basis for further analysis.
         </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-muted-foreground">
         <div className="flex items-center gap-1">
           <ShieldCheck className="h-3.5 w-3.5 opacity-70" />
-          <span>Only traces marked <strong>relevant</strong> will be kept</span>
+          <span>Includes only items marked <strong>relevant</strong></span>
         </div>
         <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
           {relevantCount} relevant
@@ -63,13 +61,12 @@ export function NeedsSnapshotCta({
           onClick={onFreeze}
           className="text-[12px] h-9 px-3 sm:px-4 w-full sm:w-auto"
         >
-          Review &amp; Freeze Needs
+          Continue
         </Button>
       </div>
 
       <div className="text-[11px] text-muted-foreground/80 leading-snug max-w-[46ch] mx-auto">
-        We’ll snapshot the <strong>relevant</strong> clauses (with rationale)
-        and show them below as a table to carry into requirement drafting.
+        You can unlock this later if needed.
       </div>
     </Card>
   );

@@ -13,12 +13,18 @@ import { cn } from "@/lib/utils";
 import AIPanel from "./tools/AIPanel";
 import LogPanel from "@/components/log/LogPanel";
 
-const TOOLS: { id: ToolId; icon: any; label: string; singleton?: boolean }[] = [
-  { id: "logs",   icon: TerminalSquare, label: "Logs",  singleton: true },
+import { IS_PROD } from "@/lib/env";
+
+const ALL_TOOLS: { id: ToolId; icon: any; label: string; singleton?: boolean; devOnly?: boolean }[] = [
+  { id: "logs",   icon: TerminalSquare, label: "Logs",  singleton: true, devOnly: true },
   { id: "ai",     icon: Bot,            label: "AI" },
-  { id: "traces", icon: ListTree,       label: "Traces" },
-  { id: "tasks",  icon: ClipboardList,  label: "Tasks" },
+  { id: "traces", icon: ListTree,       label: "Traces", devOnly: true },
+  { id: "tasks",  icon: ClipboardList,  label: "Tasks", devOnly: true },
 ];
+
+const TOOLS = IS_PROD
+  ? ALL_TOOLS.filter(t => !t.devOnly)   // ✅ production: only AI
+  : ALL_TOOLS;                          // ✅ dev: everything
 
 export default function BottomConsole() {
   const pathname = usePathname() || "/";
@@ -36,7 +42,7 @@ export default function BottomConsole() {
   // Show ALL tabs for the active tool
   const visibleTabs = useMemo(() => tabs[activeTool], [tabs, activeTool]);
 
-  const activeToolMeta = TOOLS.find(t => t.id === activeTool);
+  const activeToolMeta = ALL_TOOLS.find(t => t.id === activeTool);
   const isSingleton = !!activeToolMeta?.singleton;
 
   const handleTabClick = (tool: ToolId, tabId: string) => {

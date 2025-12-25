@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { FileCheck } from "lucide-react";
 
 import * as Dialog from "@radix-ui/react-dialog";
 
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 import { type LucideIcon } from "lucide-react";
 
+import { IS_PROD } from "@/lib/env";
 
 const ConsolePanels = dynamic(() => import("@/components/console/ConsolePanels"), {
   ssr: false,
@@ -36,39 +38,42 @@ type NavLink = {
   label: string;
   icon?: LucideIcon;
   public?: boolean;
+  devOnly?: boolean;   // ✅ add this
 };
 type NavSection = {
   label: string;
   children: NavLink[];
   public?: boolean;
+  devOnly?: boolean;   // optional
 };
 type NavItem = NavLink | NavSection;
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Home, public: false },
-  { href: "/graph", label: "Graph", icon: Network },
-  { href: "/projects", label: "Projects", icon: Network },
-  { href: "/docs", label: "Docs", icon: FileText },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/graph", label: "Graph", icon: Network, devOnly: true },
+  { href: "/projects", label: "Projects", icon: Network, devOnly: true },
+  { href: "/docs", label: "Docs", icon: FileText, devOnly: true },
+  { href: "/settings", label: "Settings", icon: Settings, devOnly: true },
   {
     label: "Workflows",
     children: [
-      { label: "TDP V1", href: "/system-c/technology-development-plan-V1", icon: Users },
-      { label: "TDP V2", href: "/system-c/technology-development-plan-V2", icon: Users },
-      { label: "Stakeholders V1", href: "/system-b/stakeholders-V1", icon: Users },
-      { label: "Stakeholders V2", href: "/system-b/stakeholders-V2", icon: Users },
-      { label: "Stakeholders V3", href: "/system-b/stakeholders-V3", icon: Users },
-      { label: "Browse cert spec V1", href: "/system-b/browse-cert-specs-V1", icon: Users },
-      { label: "Browse cert spec V2", href: "/system-b/browse-cert-specs-V2", icon: Users },
-      { label: "Browse cert spec V3", href: "/system-b/browse-cert-specs-V3", icon: Users },
-      { label: "Browse cert spec V4", href: "/system-b/browse-cert-specs-V4", icon: Users },
-      { label: "Functional Ontology V1", href: "/system-a/functional-ontology-V1", icon: Users },
-      { label: "Functional Ontology V2", href: "/system-a/functional-ontology-V2", icon: Users },
-      { label: "Functional Ontology V3", href: "/system-a/functional-ontology-V3", icon: Users },
-      { label: "Console ai-bus test", href: "/tests/console-bus-test", icon: Users },
-      { label: "Persistence inspector test", href: "/tests/persistence-inspector", icon: Users },
-      { label: "Orchestrator debug", href: "/tests/orchestrator-debug", icon: Users },
-      { label: "Event bus monitor", href: "/tests/event-bus-monitor", icon: Users },
+      { label: "TDP V1", href: "/system-c/technology-development-plan-V1", icon: Users, devOnly: true },
+      { label: "TDP V2", href: "/system-c/technology-development-plan-V2", icon: Users, devOnly: true },
+      { label: "Stakeholders V1", href: "/system-b/stakeholders-V1", icon: Users, devOnly: true },
+      { label: "Stakeholders V2", href: "/system-b/stakeholders-V2", icon: Users, devOnly: true },
+      { label: "Stakeholders V3", href: "/system-b/stakeholders-V3", icon: Users, devOnly: true },
+      { label: "Browse cert spec V1", href: "/system-b/browse-cert-specs-V1", icon: Users, devOnly: true },
+      { label: "Browse cert spec V2", href: "/system-b/browse-cert-specs-V2", icon: Users, devOnly: true },
+      { label: "Browse cert spec V3", href: "/system-b/browse-cert-specs-V3", icon: Users, devOnly: true },
+      { label: "CS25 tool", href: "/system-b/browse-cert-specs-V4", icon: FileCheck },
+      { label: "CS25 tool V2", href: "/system-b/certification-basis-V1", icon: FileCheck },
+      { label: "Functional Ontology V1", href: "/system-a/functional-ontology-V1", icon: Users, devOnly: true },
+      { label: "Functional Ontology V2", href: "/system-a/functional-ontology-V2", icon: Users, devOnly: true },
+      { label: "Functional Ontology V3", href: "/system-a/functional-ontology-V3", icon: Users, devOnly: true },
+      { label: "Console ai-bus test", href: "/tests/console-bus-test", icon: Users, devOnly: true },
+      { label: "Persistence inspector test", href: "/tests/persistence-inspector", icon: Users, devOnly: true },
+      { label: "Orchestrator debug", href: "/tests/orchestrator-debug", icon: Users, devOnly: true },
+      { label: "Event bus monitor", href: "/tests/event-bus-monitor", icon: Users, devOnly: true },
     ],
   },
 ];
@@ -120,17 +125,33 @@ function NavItemRow({
 
 /* --- SidebarNav --- */
 function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
+
+
   const pathname = usePathname();
   const { data } = useUser();
   const authed = !!data?.authenticated;
 
-  const isVisible = (i: NavItem) =>
-    "children" in i ? (i.public ?? false) || authed : (i.public ?? false) || authed;
+  const isAllowedByEnv = (link?: { devOnly?: boolean }) =>
+    !(IS_PROD && link?.devOnly);
+
+  const canSeeLink = (link: NavLink) =>
+    isAllowedByEnv(link) && ((link.public ?? false) || authed);
+
+  const canSeeItem = (i: NavItem) => {
+    if (!isAllowedByEnv(i as any)) return false;
+
+    if ("children" in i) {
+      return i.children.some(canSeeLink); // section shown only if it has ≥1 visible child
+    }
+    return (i.public ?? false) || authed;
+  };
 
   return (
     <nav className="space-y-3">
-      {NAV_ITEMS.filter(isVisible).map((item) => {
+      {NAV_ITEMS.filter(canSeeItem).map((item) => {
         if ("children" in item) {
+          const children = item.children.filter(canSeeLink);
+
           return (
             <div key={item.label}>
               {!collapsed && (
@@ -139,11 +160,14 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
                 </div>
               )}
               <div className="space-y-1">
-                {item.children.map((child) => {
-                  const active = pathname === child.href || pathname.startsWith(child.href + "/");
+                {children.map((child) => {
+                  const active =
+                    pathname === child.href || pathname.startsWith(child.href + "/");
                   const Icon = child.icon;
-                  const base = "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm";
+                  const base =
+                    "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm";
                   const cls = active ? base + " bg-muted" : base + " hover:bg-muted";
+
                   return (
                     <Link
                       key={child.href}
@@ -163,21 +187,24 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
           );
         }
 
-        const active = pathname === item.href || pathname.startsWith(item.href + "/");
-        const Icon = item.icon;
+        // plain link item
+        const link = item as NavLink;
+        const active = pathname === link.href || pathname.startsWith(link.href + "/");
+        const Icon = link.icon;
         const base = "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm";
         const cls = active ? base + " bg-muted" : base + " hover:bg-muted";
+
         return (
           <Link
-            key={(item as NavLink).href}
-            href={(item as NavLink).href}
+            key={link.href}
+            href={link.href}
             className={cls}
-            aria-label={(item as NavLink).label}
+            aria-label={link.label}
             aria-current={active ? "page" : undefined}
-            title={collapsed ? (item as NavLink).label : undefined}
+            title={collapsed ? link.label : undefined}
           >
             {Icon ? <Icon className="h-5 w-5 shrink-0" /> : null}
-            {!collapsed && <span className="truncate">{(item as NavLink).label}</span>}
+            {!collapsed && <span className="truncate">{link.label}</span>}
           </Link>
         );
       })}
@@ -190,7 +217,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // DEV-ONLY: install inspector
   useEffect(() => {
-      if (process.env.NODE_ENV === "production") return;
+      if (IS_PROD) return;
       (async () => {
         const { installOrchestratorInspector } = await import("@/lib/debug/orchestratorInspector");
         const { orchestrator } = await import("@/lib/pageOrchestrator");

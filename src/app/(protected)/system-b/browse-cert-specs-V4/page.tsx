@@ -32,6 +32,8 @@ import { NeedsSnapshotCta } from "./NeedsSnapshotCta";
 
 import { registerNeedsHandlers, NEEDS_WF } from "./needs.handlers";
 
+import { IS_PROD } from "@/lib/env";
+
 /* ----------------- helpers ----------------- */
 
 const makeId = () =>
@@ -117,6 +119,8 @@ export default function BrowseCertSpecV4Page() {
   const { boundTabId } = usePageBusChannel("ai");
 
   /* UI: show/hide debug dashboard */
+  const isDev = !IS_PROD;
+
   const [showDebug, setShowDebug] = useState(false);
 
   /* trace-store hydration gate */
@@ -658,36 +662,42 @@ export default function BrowseCertSpecV4Page() {
       <header className="space-y-1">
         <div className="flex items-center gap-3 justify-between">
           <div>
-            <h1 className="text-xl font-semibold">CS-25 — Traces by Section</h1>
+            <h1 className="text-xl font-semibold">CS-25</h1>
             <p className="text-sm text-muted-foreground">
-              Tick subparts/sections/traces to make your selections. Selections
-              persist per tab.
+              Explore
             </p>
           </div>
 
           {/* right-side controls (status + show debug) */}
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[11px]">
-              {isBound ? "bound" : "unbound"}
-            </Badge>
-            {typeof httpStatus === "number" && (
-              <Badge variant="outline" className="text-[11px]">
-                HTTP {httpStatus}
-              </Badge>
-            )}
-            {loading && (
-              <Badge variant="outline" className="text-[11px]">
-                loading…
-              </Badge>
-            )}
-            <Button
-              variant={showDebug ? "default" : "outline"}
-              size="sm"
-              className="h-8 text-[12px]"
-              onClick={() => setShowDebug((v) => !v)}
-            >
-              {showDebug ? "Hide debug" : "Show debug"}
-            </Button>
+              {isDev && (
+                <>
+                  <Badge variant="outline" className="text-[11px]">
+                    {isBound ? "bound" : "unbound"}
+                  </Badge>
+
+                  {typeof httpStatus === "number" && (
+                    <Badge variant="outline" className="text-[11px]">
+                      HTTP {httpStatus}
+                    </Badge>
+                  )}
+
+                  {loading && (
+                    <Badge variant="outline" className="text-[11px]">
+                      loading…
+                    </Badge>
+                  )}
+
+                  <Button
+                    variant={showDebug ? "default" : "outline"}
+                    size="sm"
+                    className="h-8 text-[12px]"
+                    onClick={() => setShowDebug((v) => !v)}
+                  >
+                    {showDebug ? "Hide debug" : "Show debug"}
+                  </Button>
+                </>
+              )}
           </div>
         </div>
       </header>
@@ -757,7 +767,7 @@ export default function BrowseCertSpecV4Page() {
       </section>
 
       {/* ⬇️ render debugging dashboard only when toggled on */}
-      {showDebug && (
+      {isDev && showDebug && (
         <PageDebuggingDashboard
           isBound={Boolean(boundTabId && pageId)}
           route={route}

@@ -17,6 +17,7 @@ import { CheckCircle2, Info, ChevronsUpDown, Square } from "lucide-react";
 
 import { registerAgentLangGraphHandlers } from "./agent_langgraph.handlers";
 
+import { IS_PROD } from "@/lib/env";
 
 /* ---------------- types ---------------- */
 
@@ -211,6 +212,8 @@ export default function ConsoleAiView() {
 
   const [state, setState] = useState<OrchestratorState>(orchestrator.getState?.() ?? {});
   const [wire, setWire] = useState<WireEntry[]>([]);
+
+  const isDev = !IS_PROD;
   const [showDebug, setShowDebug] = useState(false);
 
   // --- auto-scroll to bottom setup ---
@@ -310,14 +313,16 @@ export default function ConsoleAiView() {
         <div className="px-3 py-2 border-b flex items-center justify-between">
           <div className="text-[11px] text-muted-foreground">Agent Conversation</div>
           <div className="flex items-center gap-2">
-            <Button
-              variant={showDebug ? "default" : "outline"}
-              size="sm"
-              className="h-7 text-[12px]"
-              onClick={() => setShowDebug((v) => !v)}
-            >
-              {showDebug ? "Hide debug" : "Show debug"}
-            </Button>
+              {isDev && (
+                <Button
+                  variant={showDebug ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-[12px]"
+                  onClick={() => setShowDebug((v) => !v)}
+                >
+                  {showDebug ? "Hide debug" : "Show debug"}
+                </Button>
+              )}
           </div>
         </div>
 
@@ -457,7 +462,7 @@ export default function ConsoleAiView() {
       <div ref={pageEndRef} />   {/* 👈 anchor now below the input area */}
 
       {/* Debug area */}
-      {showDebug && (
+      {isDev && showDebug && (
         <div className="mt-3 space-y-3">
           <Card className="p-3">
             <div className="flex flex-wrap items-center gap-3">

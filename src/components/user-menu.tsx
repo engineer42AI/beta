@@ -5,15 +5,16 @@ import { useUser } from "@/hooks/useUser";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
+  DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   ChevronDown, Home, CreditCard, BookOpen, MessageCircleQuestion,
-  LogOut,
+  LogOut, ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
 
 // Small helper
 function initials(given?: string, family?: string) {
@@ -25,8 +26,9 @@ function initials(given?: string, family?: string) {
 export function UserMenu() {
   const { loading, data } = useUser();
 
+  const isProd = process.env.NEXT_PUBLIC_APP_ENV === "production";
+
   if (loading) {
-    // Subtle skeleton so the header doesn’t jump
     return (
       <div className="h-9 w-28 rounded-full bg-muted/40 animate-pulse" aria-hidden />
     );
@@ -48,7 +50,6 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        {/* pill button like your example */}
         <Button
           variant="secondary"
           size="sm"
@@ -69,7 +70,6 @@ export function UserMenu() {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-72 p-0 overflow-hidden">
-        {/* Header block */}
         <div className="p-4">
           <div className="flex items-center gap-3">
             <Avatar className="h-8 w-8">
@@ -87,36 +87,58 @@ export function UserMenu() {
 
         <DropdownMenuSeparator />
 
-        {/* Quick links section */}
         <div className="py-1">
+
+
+
           <DropdownMenuItem asChild className="cursor-pointer gap-2">
-            <Link href="/" className="w-full flex items-center">
+            <Link href="/overview" className="w-full flex items-center">
               <Home className="h-4 w-4 mr-2" /> Home
             </Link>
           </DropdownMenuItem>
 
-          <DropdownMenuItem asChild className="cursor-pointer gap-2">
-            <Link href="/billing" className="w-full flex items-center">
-              <CreditCard className="h-4 w-4 mr-2" /> Billing
-            </Link>
-          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+
 
           <DropdownMenuItem asChild className="cursor-pointer gap-2">
-            <Link href="/docs" className="w-full flex items-center">
-              <BookOpen className="h-4 w-4 mr-2" /> Documentation
-            </Link>
+              <Link
+                href="https://engineer42.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full flex items-center"
+              >
+                <ExternalLink className="h-4 w-4 mr-2" />
+                engineer42.ai
+              </Link>
           </DropdownMenuItem>
 
-          <DropdownMenuItem asChild className="cursor-pointer gap-2">
-            <Link href="/support" className="w-full flex items-center">
-              <MessageCircleQuestion className="h-4 w-4 mr-2" /> Questions?
-            </Link>
-          </DropdownMenuItem>
+
+          {/* ✅ DEV-ONLY links */}
+          {!isProd && (
+            <>
+              <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                <Link href="/billing" className="w-full flex items-center">
+                  <CreditCard className="h-4 w-4 mr-2" /> Billing
+                </Link>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                <Link href="/docs" className="w-full flex items-center">
+                  <BookOpen className="h-4 w-4 mr-2" /> Documentation
+                </Link>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem asChild className="cursor-pointer gap-2">
+                <Link href="/support" className="w-full flex items-center">
+                  <MessageCircleQuestion className="h-4 w-4 mr-2" /> Questions?
+                </Link>
+              </DropdownMenuItem>
+            </>
+          )}
         </div>
 
         <DropdownMenuSeparator />
 
-        {/* Logout row */}
         <DropdownMenuItem asChild className="cursor-pointer text-red-600 focus:text-red-600">
           <Link href="/api/auth/logout" className="w-full flex items-center">
             <LogOut className="h-4 w-4 mr-2" /> Log out

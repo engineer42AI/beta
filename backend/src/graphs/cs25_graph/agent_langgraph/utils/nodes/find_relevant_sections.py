@@ -32,7 +32,7 @@ class AgentInputs(BaseModel):
 class RelevanceResult(BaseModel):
     # You can change these fields any time. We won't hard-code them elsewhere.
     relevant: bool
-    rationale: Optional[str] = Field(description="Rationale in one plain-English sentence, BLUF style <20 words. Start with 'Yes;' or 'No;'.")
+    rationale: Optional[str] = Field(description="Rationale in one plain-English sentence, BLUF style <20 words. Start with 'Included because' or 'Excluded because'.")
 
 class AsyncAgent:
     def __init__(self, model, api_key: Optional[str] = None):
