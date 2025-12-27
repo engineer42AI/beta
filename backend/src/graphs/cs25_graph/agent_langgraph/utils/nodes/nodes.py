@@ -157,7 +157,20 @@ async def page_config_llm(state, store: BaseStore):
 
     selected_ids = ctx.get("selected_ids") or []
     snapshot_rows = ctx.get("snapshotRows") or []
-    frozen = bool(ctx.get("selections_frozen"))
+
+    raw_frozen = ctx.get("selections_frozen")
+
+    if isinstance(raw_frozen, bool):
+        frozen = raw_frozen
+    elif isinstance(raw_frozen, (int, float)):
+        frozen = bool(raw_frozen)
+    elif isinstance(raw_frozen, str):
+        frozen = raw_frozen.strip().lower() in ("true", "1", "yes", "y", "on")
+    else:
+        frozen = False
+
+    print("DEBUG selections_frozen raw:", raw_frozen, type(raw_frozen))
+
     frozen_at = ctx.get("selections_frozen_at") or None
 
     selection_count = len(selected_ids)
@@ -166,6 +179,8 @@ async def page_config_llm(state, store: BaseStore):
     # ✅ correctly access the latest message content
     messages = state.get("messages", [])
     latest_message = messages[-1].content.strip() if messages else ""
+
+    trigger = latest_message if latest_message in ("__needs_freeze__", "__needs_unfreeze__") else None
 
     # Acknowledge freeze/unfreeze via system_status ONLY (no chat bubbles)
     if latest_message == "__needs_freeze__":
@@ -199,6 +214,7 @@ async def page_config_llm(state, store: BaseStore):
         "selections_frozen": frozen,
         "selections_frozen_at": frozen_at,
         "system_status": status,
+        "needs_trigger": trigger,
     }
 
 
@@ -238,6 +254,11 @@ async def maybe_freeze_intro(state: AgentState, store: BaseStore):
 
 def decide_node(state) -> Literal["outline", "needs", "end"]:
     """Route execution to outline, needs, or end based on page config state."""
+
+    trigger = state.get("needs_trigger")
+    # ✅ If this run was caused by unfreeze, stop here.
+    if trigger == "__needs_unfreeze__":
+        return "end"
 
     frozen = bool(state.get("selections_frozen"))
     selection_count = int(state.get("selection_count") or 0)

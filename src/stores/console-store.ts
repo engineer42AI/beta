@@ -3,6 +3,7 @@
 
 import { useCS25ChatStore } from "@/app/(protected)/system-b/browse-cert-specs-V4/stores/chat-store";
 import { useCS25TraceStore } from "@/app/(protected)/system-b/browse-cert-specs-V4/stores/cs25-trace-store";
+import { useNeedsTableStore } from "@/app/(protected)/system-b/browse-cert-specs-V4/stores/needs-table-store";
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
@@ -324,6 +325,18 @@ export const useConsoleStore = create<ConsoleState>()(
           if (tool === "ai") {
             const binding = s.aiBindings?.[tabId];
             const route = binding?.route;
+
+            // ✅ needs table (route-scoped)
+            try {
+              if (route) {
+                const key = `${route}::${tabId}`;
+                useNeedsTableStore.getState().purgeKey(key);
+              } else {
+                // fallback: purge any keys ending with ::tabId (add helper below)
+                useNeedsTableStore.getState().purgeByTabId?.(tabId);
+              }
+            } catch {}
+
             try {
               if (route) {
                 usePageConfigStore.getState().clearConfig(route, tabId);
@@ -396,6 +409,16 @@ export const useConsoleStore = create<ConsoleState>()(
             for (const tabId of ids) {
               // ✅ get route from the current aiBindings snapshot (before removal)
               const route = aiBindings?.[tabId]?.route as string | undefined;
+
+
+              try {
+                  if (route) {
+                    useNeedsTableStore.getState().purgeKey(`${route}::${tabId}`);
+                  } else {
+                    useNeedsTableStore.getState().purgeByTabId?.(tabId);
+                  }
+              } catch {}
+
 
               try {
                 if (route) {

@@ -27,12 +27,20 @@ import {
   AGENT,
 } from "./agent_langgraph.handlers";
 
-import { NeedsTableUI, type FrozenNeedRow } from "./NeedsTableUI";
+import {
+  NeedsTableUI,
+  type FrozenNeedRow,
+  type StreamedNeedItem,
+} from "./NeedsTableUI";
+
 import { NeedsSnapshotCta } from "./NeedsSnapshotCta";
 
 import { registerNeedsHandlers, NEEDS_WF } from "./needs.handlers";
 
 import { IS_PROD } from "@/lib/env";
+
+import LoggerClient from "./loggerClient";
+import { useNeedsTableStore } from "./stores/needs-table-store";
 
 /* ----------------- helpers ----------------- */
 
@@ -114,6 +122,8 @@ function applyTraceResult(
 /* ----------------- component ----------------- */
 
 export default function BrowseCertSpecV4Page() {
+
+
   /* route + tab first (consumed below) */
   const route = usePathname() || "/";
   const { boundTabId } = usePageBusChannel("ai");
@@ -177,7 +187,7 @@ export default function BrowseCertSpecV4Page() {
   });
 
   const storageTabKey = boundTabId ?? undefined;
-  const activeKey = `${route}::${storageTabKey ?? "—"}`;
+  const activeKey = storageTabKey ? `${route}::${storageTabKey}` : null;
   const displayScopedKey =
     boundTabId && pageId ? `${boundTabId}::${pageId}` : undefined;
   const isBound = Boolean(boundTabId && pageId);
@@ -203,22 +213,21 @@ export default function BrowseCertSpecV4Page() {
   const outlineReadyRef = useRef(false);
 
   /* FREEZE / NEEDS TABLE STATE (per tab) */
-  type TabFreezeState = {
-    mode: "draft" | "frozen";
-    snapshot?: {
-      rows: FrozenNeedRow[];
-      at: string;
-    };
-  };
 
-  const [freezeByKey, setFreezeByKey] = useState<
-    Record<string, TabFreezeState>
-  >({});
 
-  const currentFreeze: TabFreezeState =
-    freezeByKey[activeKey] ?? { mode: "draft" };
-  const isFrozen = currentFreeze.mode === "frozen";
-  const currentSnapshot = currentFreeze.snapshot ?? null;
+  const needsState = useNeedsTableStore((s) => (activeKey ? s.byKey[activeKey] : undefined));
+  const ensureKey = useNeedsTableStore((s) => s.ensureKey);
+  const setMode = useNeedsTableStore((s) => s.setMode);
+  const resetStream = useNeedsTableStore((s) => s.resetStream);
+  const setMeta = useNeedsTableStore((s) => s.setMeta);
+  const appendItems = useNeedsTableStore((s) => s.appendItems);
+
+  useEffect(() => {
+      if (activeKey) ensureKey(activeKey);
+  }, [activeKey, ensureKey]);
+
+  const isFrozen = (needsState?.mode ?? "draft") === "frozen";
+  const currentSnapshotAt = needsState?.frozenAt;
 
   /* FUNCTIONS: trace helpers */
 
@@ -253,6 +262,8 @@ export default function BrowseCertSpecV4Page() {
       channel: NEEDS_WF.SYNC,
       payload,
       metadata: {
+        event: "started",
+        runId: makeId(),            // <-- critical for debugger grouping
         reason: "needs_table_sync",
       },
     });
@@ -260,77 +271,56 @@ export default function BrowseCertSpecV4Page() {
 
   // Freeze: user finalizes and we build snapshot from AI relevance === true
   function freezeSelectionNow() {
-    if (!activeKey) return;
+      if (!activeKey) return;
 
-    const ts = new Date();
-    const tsStr = ts.toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+      const ts = new Date();
+      const tsStr = ts.toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false,
+      });
 
-    const snapRows: FrozenNeedRow[] = [];
-
-    for (const [, rows] of Object.entries(sectionTraces ?? {})) {
-      if (!Array.isArray(rows)) continue;
-      for (const tr of rows) {
-        const { relevant, rationale } = extractLatestResultLocal(tr);
-        if (relevant !== true) continue; // ONLY AI-marked relevant
-        const pathNorm = normalizeTracePathLocal(tr.path_labels || []);
-        snapRows.push({
-          trace_uuid: tr.trace_uuid,
-          path_labels: pathNorm,
-          relevant,
-          rationale,
-        });
+      const snapRows: FrozenNeedRow[] = [];
+      for (const [, rows] of Object.entries(sectionTraces ?? {})) {
+        if (!Array.isArray(rows)) continue;
+        for (const tr of rows) {
+          const { relevant, rationale } = extractLatestResultLocal(tr);
+          if (relevant !== true) continue;
+          snapRows.push({
+            trace_uuid: tr.trace_uuid,
+            path_labels: normalizeTracePathLocal(tr.path_labels || []),
+            relevant,
+            rationale,
+          });
+        }
       }
-    }
 
-    // Locally update per-tab freeze state
-    setFreezeByKey((prev) => ({
-      ...prev,
-      [activeKey]: {
-        mode: "frozen",
-        snapshot: {
-          rows: snapRows,
-          at: tsStr,
-        },
-      },
-    }));
+      setMode(activeKey, "frozen", tsStr, snapRows);
+      resetStream(activeKey);
 
-    // Sync freeze + snapshot to backend (Redis + agent state)
-    sendFreezeToAgent({
-      selections_frozen: true,
-      selections_frozen_at: tsStr,
-      snapshotRows: snapRows,
-    });
+      sendFreezeToAgent({
+        selections_frozen: true,
+        selections_frozen_at: tsStr,
+        snapshotRows: snapRows,
+      });
   }
 
   // Unfreeze: allow editing again
   function unfreezeForEditing() {
-    if (!activeKey) return;
+      if (!activeKey) return;
 
-    setFreezeByKey((prev) => {
-      const oldState = prev[activeKey];
-      return {
-        ...prev,
-        [activeKey]: {
-          mode: "draft",
-          snapshot: oldState?.snapshot, // keep last snapshot around
-        },
-      };
-    });
+      setMode(activeKey, "draft");
+      setMeta(activeKey, { streaming: false, done: 0, total: 0 });
+      // optionally also clear items:
+      // resetStream(activeKey); setMeta(activeKey,{streaming:false})
 
-    // Tell backend we unlocked
-    sendFreezeToAgent({
-      selections_frozen: false,
-      selections_frozen_at: "",
-      snapshotRows: [],
-    });
+      sendFreezeToAgent({
+        selections_frozen: false,
+        selections_frozen_at: "",
+        snapshotRows: [],
+      });
   }
+
+
 
   /* orchestrator wiring */
   useEffect(() => {
@@ -345,6 +335,8 @@ export default function BrowseCertSpecV4Page() {
     pendingResultsRef.current = [];
     traceLookupRef.current = {};
 
+
+
     orchestrator.configure({
       getBinding: () => ({
         route,
@@ -352,6 +344,55 @@ export default function BrowseCertSpecV4Page() {
         tabId: boundTabId ?? undefined,
       }),
       onDeliver: ({ to, channel, payload, metadata }) => {
+        // --- streamed needs tables from backend ---
+        if (to === "page" && channel === "needsTables.event") {
+          const mTab = (metadata as any)?.tabId;
+          if (!activeKey) return;
+          if (!boundTabId) return;
+          if (mTab && mTab !== boundTabId) return;
+
+          const type = String(payload?.type ?? "");
+
+          if (type === "needsTables.runStart") {
+              resetStream(activeKey);
+              setMeta(activeKey, {
+                streaming: true,
+                done: 0,
+                total: Number(payload?.data?.total ?? 0),
+              });
+              return;
+          }
+
+          if (type === "needsTables.item") {
+              const item = payload?.item as StreamedNeedItem | undefined;
+              if (item?.need_id && item?.statement) appendItems(activeKey, [item]);
+              return;
+          }
+
+          if (type === "needsTables.itemsBatch") {
+              const items = Array.isArray(payload?.items) ? payload.items : [];
+              appendItems(activeKey, items.filter((x: any) => x?.need_id));
+              return;
+          }
+
+          if (type === "needsTables.progress") {
+              setMeta(activeKey, {
+                done: Number(payload?.done ?? 0),
+                total: Number(payload?.total ?? 0),
+              });
+              return;
+          }
+
+          if (type === "needsTables.runEnd") {
+              setMeta(activeKey, { streaming: false });
+              return;
+          }
+
+          return;
+        }
+
+
+
         if (to === "page" && channel === AGENT.TRACE_RESULT) {
           const mTab = (metadata as any)?.tabId;
           const mPage = (metadata as any)?.pageId;
@@ -459,7 +500,10 @@ export default function BrowseCertSpecV4Page() {
     return () => {
       // no-op: handlers are idempotent and guarded
     };
-  }, [route, pageId, boundTabId]);
+  }, [route, pageId, boundTabId, activeKey, resetStream, appendItems, setMeta]);
+
+
+
 
   /* once-per-bind OUTLINE_LOAD */
   const didRequestRef = useRef(false);
@@ -541,10 +585,18 @@ export default function BrowseCertSpecV4Page() {
     new Set()
   );
 
+  const debugConfig = useMemo(
+      () => ({ selectedTraceIds: Array.from(selectedTraces) }),
+      [selectedTraces]
+  );
+
   useEffect(() => {
-    setSelectedTraces(new Set());
-    setHydratedKey(null);
-  }, [activeKey]);
+      if (!storageTabKey) return;
+      setSelectedTraces(new Set());
+      setHydratedKey(null);
+  }, [route, storageTabKey]);
+
+
 
   useEffect(() => {
     const persisted = config.selectedTraceIds ?? [];
@@ -728,34 +780,34 @@ export default function BrowseCertSpecV4Page() {
                 either CTA (not frozen yet) or the frozen Needs Table
              */}
             <div className="mt-8">
-              {isFrozen && currentSnapshot ? (
-                <>
-                  <NeedsTableUI
-                    rows={currentSnapshot.rows}
-                    frozenAt={currentSnapshot.at}
-                  />
+              {isFrozen ? (
+                  <>
+                    <NeedsTableUI
+                      kind="stream"
+                      items={needsState?.items ?? []}
+                      frozenAt={currentSnapshotAt}
+                      streaming={needsState?.meta.streaming ?? false}
+                      done={needsState?.meta.done}
+                      total={needsState?.meta.total}
+                    />
 
-                  <div className="mt-3 flex flex-col items-center gap-2">
-                    <p className="text-[11px] text-muted-foreground leading-snug text-center max-w-[50ch]">
-                      Snapshot captured for this tab. These items (clause ↔
-                      rationale) form your initial Compliance Needs.
-                    </p>
+                    <div className="mt-3 flex flex-col items-center gap-2">
+                      <p className="text-[11px] text-muted-foreground leading-snug text-center max-w-[50ch]">
+                        Needs Table is built from your frozen selection. Items stream in as the backend processes them.
+                      </p>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-[12px]"
-                      onClick={unfreezeForEditing}
-                    >
-                      Edit Selection
-                    </Button>
-                  </div>
-                </>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-[12px]"
+                        onClick={unfreezeForEditing}
+                      >
+                        Edit Selection
+                      </Button>
+                    </div>
+                  </>
               ) : (
-                <NeedsSnapshotCta
-                  rows={relevantRows}
-                  onFreeze={freezeSelectionNow}
-                />
+                  <NeedsSnapshotCta rows={relevantRows} onFreeze={freezeSelectionNow} />
               )}
             </div>
           </>
@@ -768,40 +820,45 @@ export default function BrowseCertSpecV4Page() {
 
       {/* ⬇️ render debugging dashboard only when toggled on */}
       {isDev && showDebug && (
-        <PageDebuggingDashboard
-          isBound={Boolean(boundTabId && pageId)}
-          route={route}
-          boundTabId={boundTabId ?? null}
-          pageId={pageId}
-          displayScopedKey={displayScopedKey}
-          activeKey={activeKey}
-          binding={binding}
-          hydratedKey={hydratedKey}
-          storageTabKey={storageTabKey}
-          config={{ selectedTraceIds: Array.from(selectedTraces) }}
-          backendStats={backendStats}
-          rawPayload={rawPayload}
-          httpStatus={httpStatus}
-          durationMs={durationMs}
-          bytes={bytes}
-          attempt={attempt}
-          loading={loading}
-          loadError={loadError}
-          loadOutline={() => {
-            setAttempt((n) => n + 1);
-            setLoading(true);
-            setLoadError(null);
-            setHttpStatus(null);
-            setDurationMs(null);
-            setBytes(null);
-            orchestrator.deliver({
-              from: "page",
-              to: "orchestrator",
-              channel: WF.OUTLINE_LOAD,
-              payload: null,
-            });
-          }}
-        />
+        <>
+            <PageDebuggingDashboard
+              isBound={Boolean(boundTabId && pageId)}
+              route={route}
+              boundTabId={boundTabId ?? null}
+              pageId={pageId}
+              displayScopedKey={displayScopedKey}
+              activeKey={activeKey}
+              binding={binding}
+              hydratedKey={hydratedKey}
+              storageTabKey={storageTabKey}
+              config={debugConfig}
+              backendStats={backendStats}
+              rawPayload={rawPayload}
+              httpStatus={httpStatus}
+              durationMs={durationMs}
+              bytes={bytes}
+              attempt={attempt}
+              loading={loading}
+              loadError={loadError}
+              loadOutline={() => {
+                setAttempt((n) => n + 1);
+                setLoading(true);
+                setLoadError(null);
+                setHttpStatus(null);
+                setDurationMs(null);
+                setBytes(null);
+                orchestrator.deliver({
+                  from: "page",
+                  to: "orchestrator",
+                  channel: WF.OUTLINE_LOAD,
+                  payload: null,
+                });
+              }}
+            />
+            <div className="mt-6">
+              <LoggerClient tabId={boundTabId ?? null} pageId={pageId ?? null} />
+            </div>
+        </>
       )}
     </div>
   );

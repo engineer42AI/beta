@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { Button } from "@/components/ui/button";
-import JSONView from '@uiw/react-json-view';
+import JsonViewer from "@/components/dev/JsonViewer";
 
 type NodeStats = { total: number; relevant: number; notRelevant: number };
 
@@ -149,14 +149,7 @@ export default function PageDebuggingDashboard(props: {
 
         {/* interactive JSON */}
         <div className="px-4 pb-3">
-          <JSONView
-            value={config ?? {}}
-            collapsed={1}                 // expand root only; click to drill in
-            displayDataTypes={false}
-            enableClipboard
-            shortenTextAfterLength={120}
-            style={{ maxHeight: 384, overflow: 'auto', fontSize: 12 }}
-          />
+          <JsonViewer value={config ?? {}} defaultOpen={1} className="p-2 max-h-96 overflow-auto" />
         </div>
       </div>
 
@@ -245,14 +238,7 @@ export default function PageDebuggingDashboard(props: {
 
         {/* JSON viewer */}
         <div className="px-4 pb-3">
-          <JSONView
-            value={rawPayload ?? {}}
-            collapsed={1}             // compact: expand root only; click to drill in
-            displayDataTypes={false}
-            enableClipboard
-            shortenTextAfterLength={120}
-            style={{ maxHeight: 384, overflow: 'auto', fontSize: 12 }}
-          />
+          <JsonViewer value={rawPayload ?? {}} defaultOpen={1} className="p-2 max-h-96 overflow-auto" />
         </div>
       </div>
     </section>

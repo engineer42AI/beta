@@ -224,7 +224,7 @@ async def _stream_batch_parallel(
             bundle["trace"], bundle["intents"],
             fields=["intent", "events", "summary"],  # what keys to include in the response?
             include_uuids=False,
-            include_levels=["section", "trace"] # what intents to return - only for trace, or trace and section, or only for section?
+            include_levels=["section", "trace"]  # what intents to return - only for trace, or trace and section, or only for section?
         )
         payload = AgentInputs(trace_block=tb, cites_block=cb, intents_block=ib)
 
@@ -471,8 +471,8 @@ async def find_relevant_sections_llm(
 
 
 
-    summary = f"Finished running the job for {selected_count} traces"
+    #summary = f"Finished running the job for {selected_count} traces"
 
 
-    return {"messages": [AIMessage(content=summary)]}
+    #return {"messages": [AIMessage(content=summary)]}
 

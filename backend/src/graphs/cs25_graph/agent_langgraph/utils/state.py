@@ -22,3 +22,4 @@ class AgentState(MessagesState):
     selections_frozen_at: Optional[str]
 
     system_status: Optional[str] = None  # NEW
+    needs_trigger: Optional[str] = None

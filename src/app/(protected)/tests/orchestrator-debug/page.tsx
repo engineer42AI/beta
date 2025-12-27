@@ -14,6 +14,7 @@ import { ChevronDown, Clock } from "lucide-react";
 import JsonViewer from "@/components/dev/JsonViewer";
 import { WF } from "@/app/(protected)/system-b/browse-cert-specs-V4/outline.handlers";
 import { AGENT_WF } from "@/app/(protected)/system-b/browse-cert-specs-V4/agent_langgraph.handlers";  // <-- add
+import { NEEDS_WF } from "@/app/(protected)/system-b/browse-cert-specs-V4/needs.handlers";
 
 /* ── role text colors (no row fills) ───────────────────────────── */
 const roleColor: Record<WireEntry["from"] | WireEntry["to"], string> = {
@@ -42,7 +43,11 @@ function isWorkflowStart(e: WireEntry): boolean {
   const isStarter = ev === "initialRequest" || ev === "started" || ev === "user_query";
   if (!isStarter) return false;
   // accept both outline and agent workflows
-  return e.channel === WF.OUTLINE_LOAD || e.channel === AGENT_WF.RUN;
+  return (
+      e.channel === WF.OUTLINE_LOAD ||
+      e.channel === AGENT_WF.RUN ||
+      e.channel === NEEDS_WF.SYNC
+  );
 }
 
 /* ── status helpers ─────────────────────────────────────────────── */

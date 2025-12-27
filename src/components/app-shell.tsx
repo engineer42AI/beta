@@ -74,6 +74,7 @@ const NAV_ITEMS: NavItem[] = [
       { label: "Persistence inspector test", href: "/tests/persistence-inspector", icon: Users, devOnly: true },
       { label: "Orchestrator debug", href: "/tests/orchestrator-debug", icon: Users, devOnly: true },
       { label: "Event bus monitor", href: "/tests/event-bus-monitor", icon: Users, devOnly: true },
+      { label: "Orch logger", href: "/tests/orch-logger", icon: Users, devOnly: true },
     ],
   },
 ];

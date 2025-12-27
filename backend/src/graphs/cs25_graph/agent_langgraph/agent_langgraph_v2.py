@@ -18,10 +18,14 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from src.graphs.cs25_graph.agent_langgraph.utils.tools.find_relevant_sections_tool import find_relevant_sections
+
 from src.graphs.cs25_graph.agent_langgraph.utils.tools.explain_selected_sections_tool import explain_selected_sections
 from src.graphs.cs25_graph.agent_langgraph.utils.tools.recommend_sections_tool import recommend_sections
 from src.graphs.cs25_graph.agent_langgraph.utils.tools.think_tool import think_tool
 from src.graphs.cs25_graph.agent_langgraph.utils.nodes.find_relevant_sections import find_relevant_sections_llm
+
+from src.graphs.cs25_graph.agent_langgraph.utils.nodes.build_needs_table import build_needs_table
+
 
 from src.graphs.cs25_graph.agent_langgraph.utils.nodes.nodes import tool_calling_llm, UI_selections_decide_node, recommend_sections_llm, topic_llm, maybe_freeze_intro, UI_freeze_decide_node, should_run_node, page_config_llm, decide_node
 from src.graphs.cs25_graph.agent_langgraph.utils.state import AgentState
@@ -69,7 +73,7 @@ async def build_agent_graph():
     builder = StateGraph(AgentState)
 
     builder.add_node("page_config_llm", page_config_llm)
-    builder.add_node("maybe_freeze_intro", maybe_freeze_intro)
+    builder.add_node("build_needs_table", build_needs_table)
     builder.add_node("should_run_node", should_run_node)
 
     builder.add_node("topic_llm", topic_llm)
@@ -85,7 +89,7 @@ async def build_agent_graph():
 
     builder.add_conditional_edges("page_config_llm", decide_node, {
         "outline": "topic_llm",
-        "needs": "maybe_freeze_intro",
+        "needs": "build_needs_table",
         "end": END,
     })
 
@@ -94,7 +98,7 @@ async def build_agent_graph():
     builder.add_edge("topic_llm", "find_relevant_sections_llm")
     builder.add_edge("find_relevant_sections_llm", END)
 
-    builder.add_edge("maybe_freeze_intro", END)
+    builder.add_edge("build_needs_table", END)
 
     # freeze → decide
     #builder.add_conditional_edges(START, UI_freeze_decide_node, {
@@ -267,7 +271,7 @@ async def stream_agent_response(
     progress_q: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
 
     # Only AGENT runs listen to the bus to avoid relays
-    listen_to_progress = (sink == "agent_langgraph")
+    listen_to_progress = sink in ("agent_langgraph", "needs")
 
     async def _emit(evt: Dict[str, Any]) -> None:
         # Nodes emit into the bus → forward to this run
