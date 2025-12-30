@@ -12,8 +12,8 @@
       "nodes/NODES_regulation_JUL2025_V1.jsonl",
       "nodes/NODES_regulation_JUL2025_paragraphs_V1.jsonl",
       "nodes/NODES_regulation_JUL2025_traces_V1.jsonl",
-      "nodes/NODES_regulation_JUL2025_traceIntent_V1.jsonl",
-      "nodes/NODES_sectionIntent_V2_oct2025.jsonl"
+      "nodes/NODES_sectionIntent_V2_oct2025.jsonl",
+      "nodes/NODES_traceIntent_V2_dec2025.jsonl"
     ],
     "edges": [
       "edges/EDGES_regulation_JUL2025_V1.jsonl",
@@ -29,8 +29,8 @@
     "LocalSearch"
   ],
   "integrity": {
-    "checksum": "sha256:6b93cd139e9ffda31095c9c5b2619f152622d000db2508bee782390e094ad8b9",
-    "content_rev": "2025-10-04T13:38:48Z"
+    "checksum": "sha256:3a807d21126ffc1e5881bf3b267002f8bfed9dcf457b1a66a01d014dc8e9578d",
+    "content_rev": "2025-12-27T23:05:14Z"
   },
   "stats": {
     "documents": 1,

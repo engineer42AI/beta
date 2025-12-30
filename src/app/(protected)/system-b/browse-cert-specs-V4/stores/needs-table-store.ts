@@ -4,13 +4,53 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { StreamedNeedItem, FrozenNeedRow } from "../NeedsTableUI";
 
-export type NeedsMeta = { streaming: boolean; done?: number; total?: number };
+export type NeedsClusters = {
+  k: number;
+  map: Record<string, string>; // need_id -> cluster_id
+  clusters: Array<{
+    cluster_id: string;
+    size: number;
+    label: string;
+    need_ids: string[];
+  }>;
+};
+
+export type NeedStrand =
+  | "PERFORMANCE"
+  | "INTEGRITY"
+  | "INTEGRATION"
+  | "MAINTAINABILITY"
+  | "ASSURANCE";
+
+export type NeedsStrands = {
+  map: Record<
+    string,
+    { strand: NeedStrand; confidence?: number; reason?: string }
+  >; // need_id -> strand tag
+  // optional summary, if backend sends it
+  strands?: Array<{ strand: NeedStrand; size: number }>;
+};
+
+export type NeedsMeta = {
+  streaming: boolean;
+  done?: number;
+  total?: number;
+
+  // ✅ NEW
+  clustersReady?: boolean;
+  strandsReady?: boolean;
+};
 
 export type TabNeedsState = {
   mode: "draft" | "frozen";
   frozenAt?: string;
   snapshotRows?: FrozenNeedRow[];
   items: StreamedNeedItem[];
+
+  // ✅ NEW
+  clusters?: NeedsClusters;
+  strands?: NeedsStrands;
+
   meta: NeedsMeta;
 };
 
@@ -28,6 +68,13 @@ type Store = {
   setMeta: (key: string, meta: Partial<NeedsMeta>) => void;
   appendItems: (key: string, items: StreamedNeedItem[]) => void;
 
+  // ✅ NEW
+  setClusters: (key: string, clusters?: NeedsClusters) => void;
+  setStrands: (key: string, strands?: NeedsStrands) => void;
+
+
+
+
   purgeKey: (key: string) => void;
   purgeByTabId: (tabId: string) => void;
 };
@@ -35,7 +82,9 @@ type Store = {
 const DEFAULT: TabNeedsState = {
   mode: "draft",
   items: [],
-  meta: { streaming: false },
+  meta: { streaming: false, clustersReady: false, strandsReady: false },
+  clusters: undefined,
+  strands: undefined,
 };
 
 const CAP_ITEMS = 2000;
@@ -63,9 +112,14 @@ export const useNeedsTableStore = create<Store>()(
                 ...prev,
                 mode,
                 frozenAt: clearFrozen ? undefined : frozenAt ?? prev.frozenAt,
-                snapshotRows: clearFrozen
-                  ? undefined
-                  : snapshotRows ?? prev.snapshotRows,
+                snapshotRows: clearFrozen ? undefined : snapshotRows ?? prev.snapshotRows,
+
+                // ✅ when going back to draft, clear clusters
+                clusters: clearFrozen ? undefined : prev.clusters,
+                strands: clearFrozen ? undefined : prev.strands, // ✅
+                meta: clearFrozen
+                  ? { ...prev.meta, clustersReady: false, strandsReady: false }
+                  : prev.meta,
               },
             },
           };
@@ -82,7 +136,9 @@ export const useNeedsTableStore = create<Store>()(
               [key]: {
                 ...prev,
                 items: [],
-                meta: { streaming: true, done: 0, total: 0 },
+                clusters: undefined, // ✅ clear clusters on new run
+                strands: undefined, // ✅
+                meta: { streaming: true, done: 0, total: 0, clustersReady: false, strandsReady: false },
               },
             },
           };
@@ -112,6 +168,43 @@ export const useNeedsTableStore = create<Store>()(
         });
       },
 
+      // ✅ NEW
+      setClusters: (key, clusters) => {
+        get().ensureKey(key);
+        set((s) => {
+          const prev = s.byKey[key] ?? DEFAULT;
+          return {
+            byKey: {
+              ...s.byKey,
+              [key]: {
+                ...prev,
+                clusters,
+                meta: { ...prev.meta, clustersReady: Boolean(clusters?.clusters?.length) },
+              },
+            },
+          };
+        });
+      },
+
+      setStrands: (key, strands) => {
+          get().ensureKey(key);
+          set((s) => {
+            const prev = s.byKey[key] ?? DEFAULT;
+            const ready = Boolean(strands && Object.keys(strands.map ?? {}).length);
+            return {
+              byKey: {
+                ...s.byKey,
+                [key]: {
+                  ...prev,
+                  strands,
+                  meta: { ...prev.meta, strandsReady: ready },
+                },
+              },
+            };
+          });
+      },
+
+
       purgeKey: (key) =>
         set((s) => {
           if (!s.byKey[key]) return s;
@@ -130,7 +223,7 @@ export const useNeedsTableStore = create<Store>()(
     }),
     {
       name: "e42.needsTable.v1",
-      version: 1,
+      version: 3, // ✅ bump because schema changed
       partialize: (s) => ({ byKey: s.byKey }),
     }
   )

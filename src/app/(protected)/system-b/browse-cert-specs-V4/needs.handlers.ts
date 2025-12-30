@@ -379,8 +379,7 @@ export function registerNeedsHandlers() {
 
       sendToPage({ type: "needsTables.itemsBatch", items });
 
-      const maybeTotal = toNumber(items?.[0]?.total, 0);
-      bumpDone(items.length, maybeTotal > 0 ? maybeTotal : undefined);
+
     };
 
     const scheduleFlush = () => {
@@ -394,7 +393,8 @@ export function registerNeedsHandlers() {
         const type = String(chunk?.type ?? "?");
 
         // sink filter: Only accept needsTables.* events from the needs sink
-        if (type.startsWith("needsTables.") && String(chunk?.sink ?? "") !== "needs") {
+        const sink = String(chunk?.sink ?? "");
+        if (type.startsWith("needsTables.") && sink && sink !== "needs") {
           continue;
         }
 
@@ -445,16 +445,14 @@ export function registerNeedsHandlers() {
           bufferedItems.push(chunk);
           scheduleFlush();
 
-          const maybeTotal = toNumber(chunk?.item?.total, 0);
-          bumpDone(1, maybeTotal > 0 ? maybeTotal : undefined);
+
           continue;
         }
 
         // needsTables.itemsBatch from backend
         if (type === "needsTables.itemsBatch") {
           const items = Array.isArray(chunk?.items) ? chunk.items : [];
-          const maybeTotal = toNumber(items?.[0]?.total, 0);
-          if (items.length) bumpDone(items.length, maybeTotal > 0 ? maybeTotal : undefined);
+
           sendToPage(chunk);
           continue;
         }
@@ -477,6 +475,56 @@ export function registerNeedsHandlers() {
           setProgress(c.done, c.total);
           continue;
         }
+
+        // needsTables.clusters  ✅ NEW
+        if (type === "needsTables.clusters") {
+          flushItems();
+
+          const data = chunk?.data ?? {};
+          const clusters = Array.isArray(data?.clusters) ? data.clusters : [];
+
+          logNeeds({
+            event: "needs.stream.clusters",
+            tabId,
+            runId: WORK_RUN_KEY,
+            message: `clusters received (k=${Number(data?.k ?? clusters.length) || 0})`,
+            data: {
+              k: data?.k ?? clusters.length,
+              clusters: clusters.map((c: any) => ({
+                id: c?.cluster_id,
+                size: c?.size,
+                label: c?.label,
+              })),
+            },
+          });
+
+          sendToPage(chunk);
+          continue;
+        }
+
+        // needsTables.strands ✅ NEW
+        if (type === "needsTables.strands") {
+          flushItems();
+
+          const data = chunk?.data ?? {};
+          const map = data?.map ?? {};
+
+          // Optional logging (nice for debugging)
+          logNeeds({
+            event: "needs.stream.strands",
+            tabId,
+            runId: WORK_RUN_KEY,
+            message: `strands received (${Object.keys(map).length} tagged)`,
+            data: {
+              counts: data?.strands ?? undefined,
+              sample: Object.entries(map).slice(0, 5),
+            },
+          });
+
+          sendToPage(chunk);
+          continue;
+        }
+
 
         // needsTables.runEnd
         if (type === "needsTables.runEnd") {

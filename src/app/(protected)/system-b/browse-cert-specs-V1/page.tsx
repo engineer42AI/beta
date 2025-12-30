@@ -115,15 +115,23 @@ class GraphOps {
   }
 
   getIntentDetailsForBottomParagraph(uuid_bottom: string) {
-    const inEs = this.G.inEdges(uuid_bottom).filter(e => e.relation === "HAS_ANCHOR");
-    if (!inEs.length) return null;
-    const traceId = inEs[0].source;
-    const outEs = this.G.outEdges(traceId).filter(e => e.relation === "HAS_INTENT");
-    if (!outEs.length) return null;
-    const intentId = outEs[0].target;
-    const n = this.G.node(intentId);
-    if (n?.ntype !== "Intent") return null;
-    return { intent: n.intent, events: n.events, expert_notes: n.expert_notes };
+      const inEs = this.G.inEdges(uuid_bottom).filter(e => e.relation === "HAS_ANCHOR");
+      if (!inEs.length) return null;
+
+      const traceId = inEs[0].source;
+      const outEs = this.G.outEdges(traceId).filter(e => e.relation === "HAS_INTENT");
+      if (!outEs.length) return null;
+
+      const intentId = outEs[0].target;
+      const n = this.G.node(intentId);
+      if (n?.ntype !== "Intent") return null;
+
+      // ✅ New shape: summary + intent + events (matches section)
+      return {
+        summary: n.summary ?? "",
+        intent: n.intent ?? "",
+        events: Array.isArray(n.events) ? n.events : [],
+      };
   }
 
   findParagraphTracesInSection(uuid_section: string) {
@@ -262,7 +270,7 @@ export default function RegulatoryExplorer() {
   const [selectedTraceKey, setSelectedTraceKey] = useState<string>("");
 
   const [traceHierarchy, setTraceHierarchy] = useState<TraceNode[]>([]);
-  const [traceBottomIntent, setTraceBottomIntent] = useState<{ intent?: string; events?: string[]; expert_notes?: string[] } | null>(null);
+  const [traceBottomIntent, setTraceBottomIntent] = useState<{ summary?: string; intent?: string; events?: string[] } | null>(null);
   const [citations, setCitations] = useState<CitationRow[]>([]);
 
   const [tab, setTab] = useState<"overview" | "hierarchy" | "citations">("overview");
@@ -608,46 +616,50 @@ export default function RegulatoryExplorer() {
                       <Empty>Select a trace to see details.</Empty>
                     ) : tab === "overview" ? (
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div className="lg:col-span-2 mb-2">
-                          <button
-                            className="px-2 py-1 text-xs border rounded hover:bg-accent"
-                            onClick={() => setPdfSearchTerm(traceHierarchy.at(-1)?.node_label ?? null)}
-                          >
-                            Find bottom clause in PDF
-                          </button>
-                        </div>
-                        <div className="rounded-md border border-border bg-background p-3">
-                          <div className="font-medium mb-1">Intent</div>
-                          <div className="text-sm">
-                            {traceBottomIntent?.intent ? (
-                              traceBottomIntent.intent
-                            ) : (
-                              <Empty>No intent captured for this trace.</Empty>
-                            )}
+                          <div className="lg:col-span-2 mb-2">
+                            <button
+                              className="px-2 py-1 text-xs border rounded hover:bg-accent"
+                              onClick={() => setPdfSearchTerm(traceHierarchy.at(-1)?.node_label ?? null)}
+                            >
+                              Find bottom clause in PDF
+                            </button>
                           </div>
-                        </div>
 
-                        <div className="rounded-md border border-border bg-background p-3">
-                          <div className="font-medium mb-1">Events</div>
-                          <ul className="list-disc ml-5 text-sm space-y-1">
-                            {Array.isArray(traceBottomIntent?.events) && traceBottomIntent!.events!.length ? (
-                              traceBottomIntent!.events!.map((e, i) => <li key={i}>{e}</li>)
-                            ) : (
-                              <li className="italic text-muted-foreground">(none)</li>
-                            )}
-                          </ul>
-                        </div>
+                          {/* Summary */}
+                          <div className="rounded-md border border-border bg-background p-3 lg:col-span-2">
+                            <div className="font-medium mb-1">Summary</div>
+                            <div className="text-sm">
+                              {traceBottomIntent?.summary ? (
+                                traceBottomIntent.summary
+                              ) : (
+                                <Empty>No summary captured for this trace.</Empty>
+                              )}
+                            </div>
+                          </div>
 
-                        <div className="rounded-md border border-border bg-background p-3 lg:col-span-2">
-                          <div className="font-medium mb-1">Notes</div>
-                          <ul className="list-disc ml-5 text-sm space-y-1">
-                            {Array.isArray(traceBottomIntent?.expert_notes) && traceBottomIntent!.expert_notes!.length ? (
-                              traceBottomIntent!.expert_notes!.map((e, i) => <li key={i}>{e}</li>)
-                            ) : (
-                              <li className="italic text-muted-foreground">(none)</li>
-                            )}
-                          </ul>
-                        </div>
+                          {/* Intent */}
+                          <div className="rounded-md border border-border bg-background p-3">
+                            <div className="font-medium mb-1">Intent</div>
+                            <div className="text-sm">
+                              {traceBottomIntent?.intent ? (
+                                traceBottomIntent.intent
+                              ) : (
+                                <Empty>No intent captured for this trace.</Empty>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Events */}
+                          <div className="rounded-md border border-border bg-background p-3">
+                            <div className="font-medium mb-1">Events</div>
+                            <ul className="list-disc ml-5 text-sm space-y-1">
+                              {Array.isArray(traceBottomIntent?.events) && traceBottomIntent!.events!.length ? (
+                                traceBottomIntent!.events!.map((e, i) => <li key={i}>{e}</li>)
+                              ) : (
+                                <li className="italic text-muted-foreground">(none)</li>
+                              )}
+                            </ul>
+                          </div>
                       </div>
                     ) : tab === "hierarchy" ? (
                       <div className="space-y-4">

@@ -32,12 +32,18 @@ class AgentInputs(BaseModel):
     trace_block: str
     cites_block: str
     intents_block: str
+    paragraph_name: str
 
 
 class Need(BaseModel):
     statement: str = Field(description="Engineering need statement (solution-agnostic, verifiable later).")
     rationale: str = Field(description="BLUF rationale (<20 words). Start with 'Needed because ...'.")
-    need_objective: str = Field(description="A short (<10 words), declarative objective of what the need statement requires to be true.")
+    headline: str = Field(description=(
+            "UI headline. Start with one imperative verb. 6–15 words. "
+            "Max one 'and'. No implementation terms (system/device/unit/integration). "
+            "No vague filler. Output only the statement."
+        )
+    )
 
 
 class NeedsOutput(BaseModel):
@@ -45,16 +51,16 @@ class NeedsOutput(BaseModel):
 
 
 class AsyncAgent:
-    def __init__(self, model: str, api_key: Optional[str] = None):
+    def __init__(self, model: str, client: AsyncOpenAI):
         self.model = model
-        self.client = AsyncOpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self.client = client
 
     async def run(self, query: str, inputs: AgentInputs) -> Dict[str, Any]:
-        system = """
+        system = f"""
 You are an expert aircraft certification engineer specialising in CS-25 and translating regulatory intent into engineering needs.
 
 Task:
-Extract ENGINEERING NEED STATEMENTS from the provided regulatory intent and trace structure.
+Extract ENGINEERING NEED STATEMENTS from the provided regulatory intent and trace structure for the bottom paragraph: <<{inputs.paragraph_name}>>
 
 A “need” is:
 - a statement of what must be true for compliance
@@ -70,6 +76,18 @@ Do NOT:
 
 Each clause may produce zero, one, or multiple needs.
 
+– Use the classification of each paragraph to understand the structure:  
+        - Scope setter: sets boundaries.  
+        - Normative requirement: creates the obligation.  
+        - Condition clause: applies only under listed conditions.  
+        - Exception clause: narrows or excludes applicability.  
+        - Definition: clarifies technical terms.  
+        - Reference only: points to other rules.  
+        - Reserved: placeholder, no content.  
+        - Guidance: advisory, non-binding explanation.  
+
+
+
 Output:
 Return JSON matching the schema exactly.
 """
@@ -79,6 +97,8 @@ Return JSON matching the schema exactly.
 {query}
 </USER_QUERY>
 
+**INPUT TRACES for {inputs.paragraph_name}:** 
+
 <TRACE>
 {inputs.trace_block or ""}
 </TRACE>
@@ -87,6 +107,8 @@ Return JSON matching the schema exactly.
 {inputs.intents_block or ""}
 </INTENTS>
 """
+        print(f"============== [E42][NEEDS][PROMPT][SYSTEM] ==============\n {system}")
+        print(f"============== [E42][NEEDS][PROMPT][USER] ================\n {user_content}")
 
         resp = await self.client.responses.parse(
             model=self.model,
@@ -171,6 +193,15 @@ async def _call_with_retry(
         "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
     }
 
+# -----------------
+
+_OPENAI_CLIENT: Optional[AsyncOpenAI] = None
+
+def get_openai_client() -> AsyncOpenAI:
+    global _OPENAI_CLIENT
+    if _OPENAI_CLIENT is None:
+        _OPENAI_CLIENT = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    return _OPENAI_CLIENT
 
 # ------------------ Graph runtime cache ------------------
 
@@ -257,7 +288,7 @@ async def _stream_batch_parallel(
                     "path_labels": path_labels,
                     "statement": "",
                     "rationale": "",
-                    "need_objective": "",
+                    "headline": "",
                     "trace_rationale": trace_rationale,
                     "frozen_at": frozen_at,
                     "error": "missing bottom_uuid",
@@ -275,7 +306,7 @@ async def _stream_batch_parallel(
             bundle["trace"], bundle["intents"],
             fields=["intent", "events", "summary"],
             include_uuids=False,
-            include_levels=["section", "trace"],
+            include_levels=["trace"],
         )
 
         # section uuid from trace
@@ -291,7 +322,16 @@ async def _stream_batch_parallel(
         trace_intent_summary = _intent_summary_for_node(bundle.get("intents"), bottom_uuid)
         section_intent_summary = _intent_summary_for_node(bundle.get("intents"), section_uuid)
 
-        payload = AgentInputs(trace_block=tb, cites_block=cb, intents_block=ib)
+        paragraph_name = ops.get_paragraph_id(bottom_uuid)
+
+        #print(f" ******************** \nTEST \n paragraph_name: \n {paragraph_name} \n\n")
+        #print(f" ******************** \nTEST \n ib: \n {ib} \n\n")
+        #print(f" ******************** \nTEST \n tb: \n {tb} \n\n")
+        #print(f" ******************** \nTEST \n cb: \n {cb} \n\n")
+        #print(f" ******************** \nTEST \n trace_intent_summary: \n {trace_intent_summary} \n\n")
+        #print(f" ******************** \nTEST \n section_intent_summary: \n {section_intent_summary} \n\n")
+
+        payload = AgentInputs(trace_block=tb, cites_block=cb, intents_block=ib, paragraph_name=paragraph_name)
         res = await _call_with_retry(agent, query, payload)
         usage = _enrich_usage_with_costs(res.get("usage") or {}, pricing_per_million)
 
@@ -307,7 +347,7 @@ async def _stream_batch_parallel(
         for i, n in enumerate(needs):
             st = (n or {}).get("statement", "") if isinstance(n, dict) else ""
             ra = (n or {}).get("rationale", "") if isinstance(n, dict) else ""
-            obj = (n or {}).get("need_objective", "") if isinstance(n, dict) else ""
+            obj = (n or {}).get("headline", "") if isinstance(n, dict) else ""
 
             if not st.strip():
                 continue
@@ -318,7 +358,7 @@ async def _stream_batch_parallel(
                 "path_labels": path_labels,
                 "statement": st.strip(),
                 "rationale": (ra or "").strip(),  # this is needs statement rationale
-                "need_objective": (obj or "").strip(),  # shor summary of the need statement
+                "headline": (obj or "").strip(),  # shor summary of the need statement
                 "frozen_at": frozen_at,
                 "run_id": res.get("run_id"),
                 # Optional: attach usage per item; UI can ignore
@@ -326,6 +366,8 @@ async def _stream_batch_parallel(
                 "relevance_rationale": (trace_rationale or "").strip(),  # this is your frozen selection rationale
                 "intent_summary_trace": (trace_intent_summary or "").strip(),
                 "intent_summary_section": (section_intent_summary or "").strip(),
+                "paragraph_name": paragraph_name,  # ✅ bottom paragraph id/name
+                "intents_block_trace": (ib or "").strip(),  # ✅ full trace intents block (intent+events+summary)
             })
 
         # If the agent returns zero needs, still emit a “no needs” item? (optional)
@@ -407,7 +449,7 @@ async def stream_needs_for_snapshot(
         "pricing_per_million": {"input_usd": pricing_per_million[0], "output_usd": pricing_per_million[1]},
     }
 
-    agent = AsyncAgent(model=model)
+    agent = AsyncAgent(model=model, client=get_openai_client())
     total_in_tokens = 0
     total_out_tokens = 0
     pin, pout = pricing_per_million
@@ -479,6 +521,7 @@ async def build_needs_table(state, store, **kwargs):
     async def emit(evt: Dict[str, Any]) -> None:
         evt.setdefault("ts", time.time())
         evt.setdefault("tabId", tab_id)  # your frontend checks metadata.tabId; bus layer may also set it
+        evt.setdefault("sink", "needs")  # ✅ REQUIRED (frontend filters by sink)
         await bus_emit(tab_id, evt)
 
     # If not frozen, end cleanly
@@ -494,7 +537,8 @@ async def build_needs_table(state, store, **kwargs):
         tid = (r or {}).get("trace_uuid")
         if not tid or tid in seen:
             continue
-        if (r or {}).get("relevant") is not True:
+        rel = (r or {}).get("relevant")
+        if rel not in (True, "true", "True", 1):
             continue
         seen.add(tid)
         kept.append({
@@ -512,6 +556,8 @@ async def build_needs_table(state, store, **kwargs):
         "ts": time.time(),
         "data": {"selectedCount": len(kept), "frozen_at": frozen_at},
     })
+
+    all_items: List[Dict[str, Any]] = []
 
     last_progress_ts = 0.0
 
@@ -549,6 +595,7 @@ async def build_needs_table(state, store, **kwargs):
                 items = wrapped.get("items") or []
                 # You can choose to skip empty batches to reduce chatter
                 if items:
+                    all_items.extend(items)  # ✅ collect for clustering later
                     await emit({"type": "needsTables.itemsBatch", "ts": wrapped.get("ts"), "items": items})
                 # progress uses trace-done count (not needs count)
                 await emit({
@@ -573,6 +620,61 @@ async def build_needs_table(state, store, **kwargs):
                 continue
 
             if wrapped["type"] == "needsTables.runEnd":
+                # ✅ compute clusters once, at the end of the run
+                try:
+                    cluster_result = await cluster_needs_pipeline(
+                        items=all_items,
+                        openai_client=get_openai_client(),
+                        k=None,  # this is optional, chose k integer if we want manually select a number of clusters
+                    )
+
+                    # ✅ DEBUG PRINT HERE (best spot)
+                    print("\n================ NEED CLUSTERS ================\n")
+                    print(f"k={cluster_result.get('k')}, needs={len(all_items)}")
+                    for c in (cluster_result.get("clusters") or []):
+                        print(f"- {c['cluster_id']} ({c['size']}): {c['label']}")
+                    print("\n==============================================\n")
+
+                    await emit({
+                        "type": "needsTables.clusters",
+                        "ts": time.time(),
+                        "sink": "needs",
+                        "data": cluster_result,
+                    })
+                except Exception as e:
+                    await emit({
+                        "type": "needsTables.error",
+                        "node": "cluster_needs_pipeline",
+                        "ts": time.time(),
+                        "data": {"message": str(e)},
+                    })
+
+                # ✅ tag strands once needs are ready
+                try:
+                    strands_result = await tag_needs_with_strands(
+                        items=all_items,
+                        openai_client=get_openai_client(),
+                        topic=state.get("topic", "") or "",  # ✅ pass topic here
+                        model="gpt-5.2",
+                        batch_size=25,
+                    )
+
+                    await emit({
+                        "type": "needsTables.strands",
+                        "ts": time.time(),
+                        "sink": "needs",
+                        "data": strands_result,
+                    })
+                except Exception as e:
+                    await emit({
+                        "type": "needsTables.error",
+                        "node": "tag_needs_with_strands",
+                        "ts": time.time(),
+                        "data": {"message": str(e)},
+                    })
+
+
+
                 await emit({
                     "type": "needsTables.runEnd",
                     "ts": wrapped.get("ts"),
@@ -592,3 +694,500 @@ async def build_needs_table(state, store, **kwargs):
 
     await emit({"type": "needsTables.nodeDone", "node": "build_needs_table", "ts": time.time()})
     return {"messages": [AIMessage(content=f"✅ Needs table streamed for {len(kept)} traces (frozen at {frozen_at}).")]}
+
+# ----------------------------------------------------
+# Embeddings + clustering + LLM labelling for Needs
+# This is 'grouped' view
+# 28 Dec 2025
+# ----------------------------------------------------
+
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import normalize
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+
+
+def _need_cluster_text(it: Dict[str, Any]) -> str:
+    return "\n".join([
+        f"HEADLINE: {(it.get('headline') or '').strip()}",
+        f"STATEMENT: {(it.get('statement') or '').strip()}",
+        f"RATIONALE: {(it.get('rationale') or '').strip()}",
+    ]).strip()
+
+
+def _select_cluster_examples(
+    usable: List[Dict[str, Any]],
+    cluster_indices: List[int],
+    limit: int = 12,
+) -> str:
+    bullets = []
+    for j in cluster_indices[:limit]:
+        obj = (usable[j].get("headline") or "").strip()
+        st = (usable[j].get("statement") or "").strip()
+        if obj:
+            bullets.append(f"- {obj}")
+        elif st:
+            bullets.append(f"- {st[:140]}")
+    return "\n".join(bullets)
+
+
+async def embed_texts(
+    *,
+    texts: List[str],
+    openai_client: AsyncOpenAI,
+    embed_model: str = "text-embedding-3-small",
+    batch_size: int = 128,
+) -> np.ndarray:
+    vecs: List[List[float]] = []
+    for i in range(0, len(texts), batch_size):
+        resp = await openai_client.embeddings.create(
+            model=embed_model,
+            input=texts[i:i + batch_size],
+        )
+        vecs.extend([d.embedding for d in resp.data])
+
+    X = np.array(vecs, dtype=np.float32)
+    return normalize(X)  # important for cosine-ish behaviour
+
+
+def kmeans_cluster(
+    *,
+    X: np.ndarray,
+    k: int,
+    seed: int = 42,
+) -> np.ndarray:
+    k_eff = max(1, min(int(k), X.shape[0]))
+    if k_eff == 1:
+        return np.zeros(X.shape[0], dtype=int)
+
+    km = KMeans(n_clusters=k_eff, random_state=seed, n_init=10)
+    return km.fit_predict(X)
+
+
+async def label_cluster_with_llm(
+    *,
+    usable: List[Dict[str, Any]],
+    cluster_indices: List[int],
+    openai_client: AsyncOpenAI,
+    label_model: str = "gpt-5.2",
+) -> str:
+    examples = _select_cluster_examples(usable, cluster_indices, limit=12)
+
+    #TODO 29 Dec '25. Investigate this prompt, check whats exactly is passed into it
+    # also for better grouping we may need to pass into it the 'intent' block so AI understands not only the need but also the intent behind it
+    # we may need to pre-process these inputs into a format that can be organised e.g. clause, intent, broken into needs.
+
+    prompt = f"""
+You are grouping engineering needs into human-readable themes.
+
+Write ONE plain-English cluster title describing what these needs are about.
+
+Rules:
+- 3–7 words.
+- BLUF style.
+- Noun phrase (no “Demonstrate/Ensure/Verify”).
+- Use concrete aerospace nouns (e.g., oil cooler fire, EWIS wiring, latent failures, maintenance limitations).
+- Avoid vague words alone (“safety”, “compliance”, “risk”) unless paired with a concrete subject.
+- Output ONLY the title.
+
+Needs (examples):
+{examples}
+""".strip()
+
+    r = await openai_client.responses.create(
+        model=label_model,
+        input=[{"role": "user", "content": prompt}],
+    )
+    return (r.output_text or "").strip() or "Unlabelled cluster"
+
+
+async def cluster_needs_pipeline(
+    *,
+    items: List[Dict[str, Any]],
+    openai_client: AsyncOpenAI,
+    k: Optional[int] = None,   # ✅ allow None = auto
+    embed_model: str = "text-embedding-3-small",
+    label_model: str = "gpt-5.2",
+) -> Dict[str, Any]:
+    usable = [it for it in items if (it.get("statement") or "").strip()]
+
+    if not usable:
+        return {"k": 0, "map": {}, "clusters": []}
+
+    if len(usable) < 3:
+        return {"k": 0, "map": {}, "clusters": []}
+
+    need_ids = [it["need_id"] for it in usable]
+    texts = [_need_cluster_text(it) for it in usable]
+
+    X = await embed_texts(texts=texts, openai_client=openai_client, embed_model=embed_model)
+
+    # Auto-pick k (cap k_max so it doesn't go crazy)
+    k_auto, k_debug = choose_best_k(
+        X=X,
+        k_min=2,
+        k_max=min(20, max(2, int(np.sqrt(len(texts)) * 2))),
+    )
+
+    # Optional: keep your manual k mode
+    # if we pass k=None --> k_auto, otherwise select the manual k
+    k_used = int(k) if (k is not None) else int(k_auto)
+
+    print("[needs clustering] k_auto:", k_auto, "k_used:", k_used)
+    print("[needs clustering] top candidates:", sorted(k_debug["grid"], key=lambda r: -r["silhouette_cosine"])[:5])
+
+    labels = kmeans_cluster(X=X, k=k_used)
+
+
+
+    from collections import Counter
+    print("[needs clustering] k_used:", k_used, "unique_labels:", len(set(labels)))
+    print("[needs clustering] label counts:", dict(Counter(labels.tolist())))
+
+    grouped: Dict[int, List[int]] = {}
+    for idx, lab in enumerate(labels):
+        grouped.setdefault(int(lab), []).append(idx)
+
+    ordered = sorted(grouped.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+    for lab, idxs in ordered:
+        print("cluster", lab, "size", len(idxs))
+        for j in idxs[:3]:
+            print(" -", usable[j].get("headline") or usable[j].get("statement", "")[:120])
+
+    clusters_out = []
+    map_out: Dict[str, str] = {}
+
+    for i, (_lab, idxs) in enumerate(ordered, start=1):
+        cid = f"C-{i:02d}"
+        for j in idxs:
+            map_out[need_ids[j]] = cid
+
+        label = await label_cluster_with_llm(
+            usable=usable,
+            cluster_indices=idxs,
+            openai_client=openai_client,
+            label_model=label_model,
+        )
+
+        clusters_out.append({
+            "cluster_id": cid,
+            "size": len(idxs),
+            "label": label,
+            "need_ids": [need_ids[j] for j in idxs],
+        })
+
+    return {"k": len(clusters_out), "map": map_out, "clusters": clusters_out}
+
+def choose_best_k(
+    *,
+    X: np.ndarray,
+    k_min: int = 2,
+    k_max: int = 20,
+    seed: int = 42,
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Pick k by maximizing silhouette (cosine). Also records CH + DB for debugging.
+    X should already be normalized (you already do normalize()).
+    """
+    n = int(X.shape[0])
+    if n < 3:
+        return 1, {"reason": "too_few_items", "n": n}
+
+    k_max_eff = min(int(k_max), n - 1)
+    k_min_eff = min(int(k_min), k_max_eff)
+    if k_max_eff < 2:
+        return 1, {"reason": "too_few_items_for_k2", "n": n}
+
+    best_k = 2
+    best_sil = -1.0
+    rows = []
+
+    for k in range(k_min_eff, k_max_eff + 1):
+        km = KMeans(n_clusters=k, random_state=seed, n_init=10)
+        labels = km.fit_predict(X)
+
+        # silhouette requires at least 2 labels
+        sil = silhouette_score(X, labels, metric="cosine")
+        ch = calinski_harabasz_score(X, labels)
+        db = davies_bouldin_score(X, labels)
+
+        rows.append({"k": k, "silhouette_cosine": sil, "calinski_harabasz": ch, "davies_bouldin": db})
+        if sil > best_sil:
+            best_sil = sil
+            best_k = k
+
+    return best_k, {"picked_by": "silhouette_cosine", "best_silhouette": best_sil, "grid": rows}
+
+
+# ------------------ Strand tagging (Drivers view) ------------------
+
+from enum import Enum
+from pydantic import BaseModel, Field
+
+class Strand(str, Enum):
+    FUNCTIONAL_DESIGN_PERFORMANCE = "FUNCTIONAL_DESIGN_PERFORMANCE"
+    MATERIALS = "MATERIALS"
+    MANUFACTURING_METHOD = "MANUFACTURING_METHOD"
+    INTEGRATION_ENVIRONMENT = "INTEGRATION_ENVIRONMENT"
+    OTHER = "OTHER"
+
+class SingleStrandOutput(BaseModel):
+    strand: Strand
+    confidence: float = Field(ge=0, le=1)
+    reason: str = Field(description="<= 12 words. Concrete, no fluff.")
+
+def _need_core_block(it: Dict[str, Any]) -> str:
+    return "\n".join([
+        f"NEED_HEADLINE: {(it.get('headline') or '').strip()}",
+        f"NEED_STATEMENT: {(it.get('statement') or '').strip()}",
+        f"NEED_RATIONALE: {(it.get('rationale') or '').strip()}",
+    ]).strip()
+
+async def tag_needs_with_strands(
+    *,
+    items: List[Dict[str, Any]],
+    openai_client: AsyncOpenAI,
+    topic: str,
+    model: str = "gpt-5.2",
+    batch_size: int = 25,
+    concurrency: int = 8,
+    pricing_per_million: Tuple[float, float] = (0.05, 0.40),  # ✅ add pricing like needs
+    debug: bool = True,
+) -> Dict[str, Any]:
+    usable = [it for it in items if (it.get("statement") or "").strip()]
+    if not usable:
+        return {
+            "map": {},
+            "tags": [],
+            "summary": {
+                "model": model,
+                "total_needs": 0,
+                "success": 0,
+                "failed": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "estimated_cost": 0.0,
+                "pricing_per_million": {"input_usd": pricing_per_million[0], "output_usd": pricing_per_million[1]},
+            },
+        }
+
+    topic = (topic or "").strip()
+    sem = asyncio.Semaphore(max(1, int(concurrency)))
+    pin, pout = pricing_per_million
+
+    system = """
+You are an expert aerospace certification & technology maturation engineer.
+
+Goal:
+Classify the NEED into ONE "technology strand" (maturity dimension).
+This is not a verification method and not a requirement rewrite.
+
+Technology strands (choose ONE):
+
+1) FUNCTIONAL_PERFORMANCE
+   - The key uncertainty is whether the item performs its intended function
+     to required levels across operating conditions (capacity, thermal limits,
+     control behaviour, envelope performance, efficiency, stability).
+
+2) MATERIALS_INTEGRITY
+   - The key uncertainty is material behaviour or structural/physical integrity:
+     strength/allowables, durability, fatigue/fracture/crack growth,
+     corrosion/erosion/creep, damage tolerance, containment,
+     leak/rupture prevention, fire resistance.
+   - If "vibration" is mentioned:
+       * structural integrity / fatigue under vibration loads -> MATERIALS_INTEGRITY
+       * installation vib environment / isolation / interface effects -> INTEGRATION_ENVIRONMENT
+
+3) MANUFACTURING_MAINTAINABILITY
+   - The key uncertainty is build/assembly/process maturity or maintainability:
+     manufacturing method maturity, process capability & repeatability,
+     joining/winding/impregnation/fabrication steps, inspection/QA,
+     tolerances, repairability, service access, draining, inspection intervals,
+     maintenance error prevention.
+
+4) INTEGRATION_ENVIRONMENT
+   - The key uncertainty is behaviour when installed and interacting with the
+     system + operational environment:
+     interfaces, routing/ducting, packaging, fire zones, icing/freezing,
+     EMI/EMC, thermal interactions, dependencies, integration complexity,
+     environmental compatibility in the relevant environment.
+
+5) OTHER
+   - Use only if it does not fit the four strands (e.g., purely administrative,
+     documentation-only, generic programme assurance statements without a
+     technical maturity dimension).
+
+Rules:
+- Use the full INTENTS block as primary context.
+- Use the NEED statement/objective as the item being classified.
+- Do not invent design details.
+- Output must match the schema exactly.
+""".strip()
+
+    # Totals across whole run
+    total_in_tokens = 0
+    total_out_tokens = 0
+    total_cost = 0.0
+    success = 0
+    failed = 0
+
+    async def tag_one(it: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        need_id = it.get("need_id", "")
+        need_code = it.get("need_code", "")
+        paragraph_name = (it.get("paragraph_name") or "").strip()
+        intents_block = (it.get("intents_block_trace") or "").strip()
+        need_block = _need_core_block(it)
+
+        user = f"""
+<TOPIC>
+{topic}
+</TOPIC>
+
+<NEED>
+{need_block}
+</NEED>
+
+<BOTTOM_PARAGRAPH - this is the regulatory clause of focus>
+{paragraph_name}
+</BOTTOM_PARAGRAPH>
+
+<TRACE_INTENTS - this is a {paragraph_name} regulatory clause from which the engineering need was derived>
+{intents_block}
+</TRACE_INTENTS>
+""".strip()
+
+        delay = 0.6
+        for attempt in range(5):
+            try:
+                if debug:
+                    print("\n" + "=" * 120)
+                    print(f"[E42][STRANDS][REQ] need_id={need_id} need_code={need_code} attempt={attempt+1}/5 model={model}")
+                    print("-" * 120)
+                    print("[SYSTEM]\n" + system)
+                    print("-" * 120)
+                    print("[USER]\n" + user)
+                    print("=" * 120 + "\n")
+
+                async with sem:
+                    resp = await openai_client.responses.parse(
+                        model=model,
+                        input=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user},
+                        ],
+                        text_format=SingleStrandOutput,
+                    )
+
+                parsed_obj = resp.output_parsed
+                parsed = parsed_obj.model_dump(mode="json") if hasattr(parsed_obj, "model_dump") else parsed_obj.dict()
+
+                # ✅ usage -> cost (same helper you already have)
+                usage = {
+                    "input_tokens": getattr(resp.usage, "input_tokens", 0) if getattr(resp, "usage", None) else 0,
+                    "output_tokens": getattr(resp.usage, "output_tokens", 0) if getattr(resp, "usage", None) else 0,
+                    "total_tokens": getattr(resp.usage, "total_tokens", 0) if getattr(resp, "usage", None) else 0,
+                }
+                usage = _enrich_usage_with_costs(usage, pricing_per_million)
+
+                if debug:
+                    print("\n" + "-" * 120)
+                    print(f"[E42][STRANDS][RESP] need_id={need_id} need_code={need_code}")
+                    print("[PARSED OUTPUT]")
+                    try:
+                        print(json.dumps(parsed, indent=2, ensure_ascii=False))
+                    except Exception:
+                        print(parsed)
+                    print("[USAGE]")
+                    print(json.dumps(usage, indent=2))
+                    print("-" * 120 + "\n")
+
+                return {
+                    "need_id": need_id,                 # local mapping key (LLM never saw it)
+                    "strand": parsed.get("strand"),
+                    "confidence": float(parsed.get("confidence", 0.0) or 0.0),
+                    "reason": (parsed.get("reason") or "").strip(),
+                    "usage": usage,                     # ✅ attach per-need usage (optional)
+                }
+
+            except APIStatusError as e:
+                code = getattr(e, "status_code", 0)
+                retryable = code in (429, 500, 502, 503, 504)
+                if debug:
+                    print(f"[E42][STRANDS][APIStatusError] need_id={need_id} code={code} retryable={retryable} err={e}")
+                if retryable and attempt < 4:
+                    await asyncio.sleep(delay + random.uniform(0, 0.4))
+                    delay = min(delay * 2, 6)
+                    continue
+                return None
+            except Exception as e:
+                if debug:
+                    print(f"[E42][STRANDS][Exception] need_id={need_id} attempt={attempt+1}/5 err={type(e).__name__}: {e}")
+                if attempt < 4:
+                    await asyncio.sleep(delay + random.uniform(0, 0.4))
+                    delay = min(delay * 2, 6)
+                    continue
+                return None
+
+        return None
+
+    out_tags: List[Dict[str, Any]] = []
+
+    for i in range(0, len(usable), batch_size):
+        chunk = usable[i : i + batch_size]
+
+        if debug:
+            print("\n" + "#" * 120)
+            print(f"[E42][STRANDS][BATCH] {i//batch_size + 1} | items {i}..{i + len(chunk) - 1} | "
+                  f"batch_size={batch_size} concurrency={concurrency} pricing_in={pin} pricing_out={pout}")
+            print("#" * 120 + "\n")
+
+        results = await asyncio.gather(*[asyncio.create_task(tag_one(it)) for it in chunk])
+
+        for r in results:
+            if isinstance(r, dict) and r.get("need_id"):
+                out_tags.append(r)
+                u = r.get("usage") or {}
+                total_in_tokens += int(u.get("input_tokens", 0) or 0)
+                total_out_tokens += int(u.get("output_tokens", 0) or 0)
+                total_cost += float(u.get("total_cost", 0.0) or 0.0)
+                success += 1
+            else:
+                failed += 1
+
+        if debug:
+            batch_cost = (total_in_tokens / 1e6) * pin + (total_out_tokens / 1e6) * pout
+            print(f"[E42][STRANDS][PROGRESS] success={success} failed={failed} "
+                  f"tokens_in={total_in_tokens} tokens_out={total_out_tokens} est_cost={batch_cost:.6f}")
+
+    # map need_id -> {strand, confidence, reason}
+    m: Dict[str, Any] = {}
+    for t in out_tags:
+        nid = t.get("need_id")
+        if not nid:
+            continue
+        m[nid] = {
+            "strand": t.get("strand"),
+            "confidence": float(t.get("confidence", 0.0) or 0.0),
+            "reason": (t.get("reason") or "").strip(),
+        }
+
+    summary = {
+        "model": model,
+        "total_needs": len(usable),
+        "success": success,
+        "failed": failed,
+        "tokens_in": total_in_tokens,
+        "tokens_out": total_out_tokens,
+        "estimated_cost": (total_in_tokens / 1e6) * pin + (total_out_tokens / 1e6) * pout,
+        "pricing_per_million": {"input_usd": pin, "output_usd": pout},
+    }
+
+    if debug:
+        print("\n" + "=" * 90)
+        print("[E42][STRANDS][SUMMARY]")
+        print(json.dumps(summary, indent=2))
+        print("=" * 90 + "\n")
+
+    return {"map": m, "tags": out_tags, "summary": summary}
+

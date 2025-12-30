@@ -9,3 +9,4 @@ langgraph
 langchain-core
 langgraph-checkpoint-redis
 langchain-openai
+scikit-learn

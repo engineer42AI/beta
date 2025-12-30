@@ -221,6 +221,8 @@ export default function BrowseCertSpecV4Page() {
   const resetStream = useNeedsTableStore((s) => s.resetStream);
   const setMeta = useNeedsTableStore((s) => s.setMeta);
   const appendItems = useNeedsTableStore((s) => s.appendItems);
+  const setClusters = useNeedsTableStore((s) => s.setClusters);
+  const setStrands = useNeedsTableStore((s) => s.setStrands);
 
   useEffect(() => {
       if (activeKey) ensureKey(activeKey);
@@ -383,6 +385,16 @@ export default function BrowseCertSpecV4Page() {
               return;
           }
 
+          if (type === "needsTables.clusters") {
+              setClusters(activeKey, payload?.data);
+              return;
+          }
+
+          if (type === "needsTables.strands") {
+              setStrands(activeKey, payload?.data);
+              return;
+          }
+
           if (type === "needsTables.runEnd") {
               setMeta(activeKey, { streaming: false });
               return;
@@ -500,7 +512,7 @@ export default function BrowseCertSpecV4Page() {
     return () => {
       // no-op: handlers are idempotent and guarded
     };
-  }, [route, pageId, boundTabId, activeKey, resetStream, appendItems, setMeta]);
+  }, [route, pageId, boundTabId, activeKey, resetStream, appendItems, setMeta, setClusters, setStrands]);
 
 
 
@@ -789,6 +801,10 @@ export default function BrowseCertSpecV4Page() {
                       streaming={needsState?.meta.streaming ?? false}
                       done={needsState?.meta.done}
                       total={needsState?.meta.total}
+                      clusters={needsState?.clusters}
+                      clustersReady={needsState?.meta.clustersReady}
+                      strands={needsState?.strands}                 // ✅ new
+                      strandsReady={needsState?.meta.strandsReady} // ✅ new
                     />
 
                     <div className="mt-3 flex flex-col items-center gap-2">

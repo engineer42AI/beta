@@ -254,6 +254,20 @@ class GraphOps:
         intents = self._collect_intents(trace, bottom_uuid)
         return {"bottom_uuid": bottom_uuid, "trace": trace, "cites": cites, "intents": intents}
 
+    def get_paragraph_id(self, uuid_paragraph: str) -> Optional[str]:
+        """
+        Given a Paragraph node UUID, return its paragraph_id (e.g. '25.20(b)(1)(i)').
+
+        Returns None if:
+          - UUID not in graph
+          - node is not a Paragraph
+          - paragraph_id missing
+        """
+        n = self.G.nodes.get(uuid_paragraph, {})
+        if n.get("ntype") != "Paragraph":
+            return None
+        return n.get("paragraph_id")
+
     # --- LLM-friendly formatters -------------------------------------------------
 
     def format_trace_block(self, trace, *, include_uuids: bool = True, include_text: bool = False) -> str:

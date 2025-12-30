@@ -382,29 +382,70 @@ function DrawerBody({ data }: { data: ResolvedPayload | null }) {
 
       <Separator />
 
-      {/* INTENT */}
+      {/* INTENT (TRACE) — match SECTION layout */}
       <TabsContent value="intent">
-        <div className="rounded-md border bg-card p-3">
-          {data.intent ? (
-            <>
-              {data.intent.summary && (
-                <p className="mb-2 text-[13px] leading-5">
-                  {data.intent.summary}
-                </p>
-              )}
-              {data.intent.intent && (
-                <p className="text-[13px] leading-5 whitespace-pre-wrap">
-                  {data.intent.intent}
-                </p>
-              )}
-              {Array.isArray(data.intent.events) &&
-                data.intent.events.length > 0 && (
-                  <>
-                    <div className="text-[10px] uppercase text-muted-foreground mt-3 mb-1">
-                      Events
+          {(() => {
+            // Normalize whatever backend sends
+            const raw = (data as any)?.intent;
+            const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
+
+            const merged = {
+              summary: items.find((i: any) => i?.summary)?.summary ?? "",
+              intent: items.find((i: any) => i?.intent)?.intent ?? "",
+              events: items.flatMap((i: any) => {
+                const ev = i?.events;
+                if (Array.isArray(ev)) return ev;
+                if (typeof ev === "string" && ev.trim()) return [ev.trim()];
+                return [];
+              }),
+            };
+
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {/* Summary + Intent */}
+                <div className="rounded-md border bg-card p-3 flex flex-col gap-3">
+                  <div>
+                    <div className="text-[10px] uppercase text-muted-foreground mb-1">
+                      Summary
                     </div>
+                    {merged.summary ? (
+                      <p className="text-[13px] leading-5">{merged.summary}</p>
+                    ) : (
+                      <p className="italic text-muted-foreground text-[13px] leading-5">
+                        No summary.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="border-t border-border pt-2">
+                    <div className="text-[10px] uppercase text-muted-foreground mb-1">
+                      Intent
+                    </div>
+                    {merged.intent ? (
+                      <p className="text-[13px] leading-5 whitespace-pre-wrap">
+                        {merged.intent}
+                      </p>
+                    ) : (
+                      <p className="italic text-muted-foreground text-[13px] leading-5">
+                        No intent.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Events */}
+                <div className="rounded-md border bg-card p-3 flex flex-col">
+                  <div className="text-[10px] uppercase text-muted-foreground mb-2">
+                    Events
+                  </div>
+
+                  {merged.events.length === 0 ? (
+                    <div className="italic text-muted-foreground text-[13px] leading-5">
+                      (none)
+                    </div>
+                  ) : (
                     <ul className="space-y-2">
-                      {data.intent.events.map((e: any, i: number) => (
+                      {merged.events.map((e: any, i: number) => (
                         <li
                           key={i}
                           className="rounded border p-2.5 bg-background text-[13px] leading-5"
@@ -413,23 +454,11 @@ function DrawerBody({ data }: { data: ResolvedPayload | null }) {
                         </li>
                       ))}
                     </ul>
-                  </>
-                )}
-
-              {!data.intent.summary &&
-                !data.intent.intent &&
-                !Array.isArray(data.intent.events) && (
-                  <p className="italic text-muted-foreground text-[13px] leading-5">
-                    No intent.
-                  </p>
-                )}
-            </>
-          ) : (
-            <p className="italic text-muted-foreground text-[13px] leading-5">
-              No intent.
-            </p>
-          )}
-        </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
       </TabsContent>
 
       {/* HIERARCHY */}

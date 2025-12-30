@@ -5,7 +5,8 @@ import * as React from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { AlertTriangle, Search, BookOpen, FileText } from "lucide-react";
+import { AlertTriangle, Search, BookOpen, Loader2, List, Layers, Compass } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   DndContext,
@@ -34,19 +35,45 @@ export type FrozenNeedRow = {
 /** streamed needs (built from frozen selection) */
 export type StreamedNeedItem = {
   need_id: string;        // stable internal id
-  need_code?: string;     // ✅ display id like N-03-01 (optional for now)
+  need_code?: string;     // display id like N-03-01 (optional)
   trace_uuid: string;
   path_labels: string[];
 
-  statement: string; // need statement (primary)
-  rationale: string; // BLUF rationale (shown on expand)
-  need_objective: string;  // a short summary of the need statement
+  statement: string;
+  rationale: string;
+  headline: string;
 
   frozen_at?: string;
 
   relevance_rationale?: string;
   intent_summary_trace?: string;
   intent_summary_section?: string;
+};
+
+/** clustering payload from backend: needsTables.clusters */
+export type NeedsCluster = {
+  cluster_id: string;        // e.g. C-01
+  size: number;
+  label: string;             // human label
+  need_ids: string[];
+};
+
+export type NeedsClusterResult = {
+  k: number;
+  map: Record<string, string>; // need_id -> cluster_id
+  clusters: NeedsCluster[];    // ordered (largest first)
+};
+
+export type NeedStrand =
+  | "FUNCTIONAL_DESIGN_PERFORMANCE"
+  | "MATERIALS"
+  | "MANUFACTURING_METHOD"
+  | "INTEGRATION_ENVIRONMENT"
+  | "OTHER"
+
+export type NeedsStrandsResult = {
+  map: Record<string, { strand: NeedStrand; confidence?: number; reason?: string }>;
+  strands?: Array<{ strand: NeedStrand; size: number }>;
 };
 
 type Props =
@@ -62,6 +89,10 @@ type Props =
       streaming?: boolean;
       done?: number;
       total?: number;
+
+      /** optional: pass once you receive needsTables.clusters */
+      clusters?: NeedsClusterResult;
+      strands?: NeedsStrandsResult;
     };
 
 /* ---------------- helpers ---------------- */
@@ -140,10 +171,7 @@ function useColumnResizer() {
 
   React.useEffect(() => {
     try {
-      localStorage.setItem(
-        "e42.needsTable.colWidths.v2",
-        JSON.stringify(widths)
-      );
+      localStorage.setItem("e42.needsTable.colWidths.v2", JSON.stringify(widths));
     } catch {}
   }, [widths]);
 
@@ -234,39 +262,67 @@ function SortableResizableTh({
 
 export function NeedsTableUI(props: Props) {
   const headerCount = props.kind === "snapshot" ? props.rows.length : props.items.length;
+  const clusterCount = props.kind === "stream" ? (props.clusters?.clusters?.length ?? 0) : 0;
+  const strandCount = props.kind === "stream" ? Object.keys(props.strands?.map ?? {}).length : 0;
 
   return (
     <TooltipProvider delayDuration={200}>
-        <Card className="border border-border rounded-lg overflow-hidden">
-          <div className="flex flex-wrap items-center gap-2 border-b bg-accent/20 px-3 py-2">
-            <div className="text-[12px] font-semibold text-foreground">Needs Table</div>
+      <Card className="border border-border rounded-lg overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 border-b bg-accent/20 px-3 py-2">
+          <div className="text-[12px] font-semibold text-foreground">Needs Table</div>
 
-            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
-              {headerCount} items
-            </Badge>
+          <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+            {headerCount} needs
+          </Badge>
 
-            {props.kind === "stream" && (
-              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
-                {props.streaming ? "streaming…" : "ready"}
-                {typeof props.done === "number" && typeof props.total === "number"
-                  ? ` ${props.done}/${props.total}`
-                  : ""}
-              </Badge>
-            )}
+          {props.kind === "stream" && (
+              <>
+                {typeof props.done === "number" && typeof props.total === "number" && (
+                  <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                    <span className="inline-flex items-center gap-1.5">
+                      {props.streaming && <Loader2 className="h-3 w-3 animate-spin" />}
+                      certification clauses {props.done}/{props.total}
+                    </span>
+                  </Badge>
+                )}
 
-            {props.frozenAt && (
-              <div className="ml-auto text-[10px] text-muted-foreground tabular-nums">
-                frozen {props.frozenAt}
-              </div>
-            )}
-          </div>
+                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                  {clusterCount > 0 ? (
+                    `${clusterCount} clusters`
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      clusters pending
+                    </span>
+                  )}
+                </Badge>
 
-          {props.kind === "snapshot" ? (
-            <SnapshotTable rows={props.rows} />
-          ) : (
-            <StreamTable items={props.items} />
+                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                  {props.kind === "stream" ? (
+                    strandCount > 0 ? `${strandCount} tagged` : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        drivers pending
+                      </span>
+                    )
+                  ) : null}
+                </Badge>
+              </>
           )}
-        </Card>
+
+          {props.frozenAt && (
+            <div className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+              frozen {props.frozenAt}
+            </div>
+          )}
+        </div>
+
+        {props.kind === "snapshot" ? (
+          <SnapshotTable rows={props.rows} />
+        ) : (
+          <StreamTable items={props.items} clusters={props.clusters} strands={props.strands} />
+        )}
+      </Card>
     </TooltipProvider>
   );
 }
@@ -335,17 +391,25 @@ function SnapshotTable({ rows }: { rows: FrozenNeedRow[] }) {
 
 /* ---------------- streamed table: NEED-focused + expandable row ---------------- */
 
-function StreamTable({ items }: { items: StreamedNeedItem[] }) {
+function StreamTable({
+  items,
+  clusters,
+  strands,
+}: {
+  items: StreamedNeedItem[];
+  clusters?: NeedsClusterResult;
+  strands?: NeedsStrandsResult;
+}) {
   // NOTE: order is only for reorderable columns (exclude exp so it stays pinned)
   const [order, setOrder] = React.useState<ColId[]>(() => {
     try {
       const raw = localStorage.getItem("e42.needsTable.colOrder.v1");
       if (raw) {
         const parsed = JSON.parse(raw);
-        // ensure exp is not included (pinned)
         const allowed: ColId[] = ["clause", "need", "ids"];
-        const cleaned = (Array.isArray(parsed) ? parsed : [])
-          .filter((c): c is ColId => allowed.includes(c));
+        const cleaned = (Array.isArray(parsed) ? parsed : []).filter((c): c is ColId =>
+          allowed.includes(c)
+        );
         return ["exp", ...cleaned];
       }
     } catch {}
@@ -355,23 +419,40 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
   // persist without exp (so we don't break older saves)
   React.useEffect(() => {
     try {
-      localStorage.setItem(
-        "e42.needsTable.colOrder.v1",
-        JSON.stringify(order.filter((c) => c !== "exp"))
-      );
+      localStorage.setItem("e42.needsTable.colOrder.v1", JSON.stringify(order.filter((c) => c !== "exp")));
     } catch {}
   }, [order]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
-  );
+  const collapseAllGroups = React.useCallback(() => {
+      const next: Record<string, boolean> = {};
+      for (const c of clusters?.clusters ?? []) next[c.cluster_id] = true;
+      // include UNCLUSTERED if it exists later
+      next["UNCLUSTERED"] = true;
+      setCollapsed(next);
+  }, [clusters]);
 
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const { widths, beginResize, setWidths } = useColumnResizer();
 
   // expanded rows by need_id
   const [open, setOpen] = React.useState<Record<string, boolean>>({});
-  const toggleRow = (needId: string) =>
-    setOpen((s) => ({ ...s, [needId]: !s[needId] }));
+  const toggleRow = (needId: string) => setOpen((s) => ({ ...s, [needId]: !s[needId] }));
+
+  // group collapsed state
+  const [collapsed, setCollapsed] = React.useState<Record<string, boolean>>({});
+
+  type ViewMode = "flat" | "grouped" | "drivers";
+  const [view, setView] = React.useState<ViewMode>("flat");
+
+  const hasClusters = !!clusters?.clusters?.length;
+  const hasDrivers = Object.keys(strands?.map ?? {}).length > 0;
+
+  React.useEffect(() => {
+      if (!hasClusters) return;
+      setView((v) => (v === "flat" ? "grouped" : v)); // don't override user's choice
+      collapseAllGroups();
+  }, [hasClusters, collapseAllGroups]);
 
   const onDragEnd = (e: DragEndEvent) => {
     const { active, over } = e;
@@ -383,6 +464,80 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
 
     setOrder((prev) => arrayMove(prev, oldIndex, newIndex));
   };
+
+  const clusterIdForNeed = React.useCallback(
+    (needId: string) => {
+      const cid = clusters?.map?.[needId];
+      return cid || "UNCLUSTERED";
+    },
+    [clusters]
+  );
+
+  // ✅ Add it right here (next to clusterIdForNeed)
+  const strandForNeed = React.useCallback(
+    (needId: string) => strands?.map?.[needId]?.strand ?? "ASSURANCE",
+    [strands]
+  );
+
+  const driversGrouped = React.useMemo(() => {
+      if (view !== "drivers" || !hasDrivers) return null;
+
+      const buckets: Record<string, StreamedNeedItem[]> = {};
+      for (const it of items) {
+        const s = strandForNeed(it.need_id);
+        (buckets[s] ||= []).push(it);
+      }
+
+      const strandOrder: NeedStrand[] = [
+          "FUNCTIONAL_DESIGN_PERFORMANCE",
+          "MATERIALS",
+          "MANUFACTURING_METHOD",
+          "INTEGRATION_ENVIRONMENT",
+          "OTHER",
+      ];
+
+      return strandOrder
+          .filter((k) => buckets[k]?.length)
+          .map((k) => ({ cid: k, label: k, items: buckets[k] }));
+  }, [view, hasDrivers, items, strandForNeed]);
+
+
+  const clusterLabelById = React.useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const c of clusters?.clusters ?? []) m[c.cluster_id] = c.label;
+    return m;
+  }, [clusters]);
+
+  const grouped = React.useMemo(() => {
+    if (view !== "grouped" || !hasClusters) return null;
+
+    const buckets: Record<string, StreamedNeedItem[]> = {};
+    for (const it of items) {
+      const cid = clusterIdForNeed(it.need_id);
+      (buckets[cid] ||= []).push(it);
+    }
+
+    const orderedIds = (clusters?.clusters ?? []).map((c) => c.cluster_id);
+    const hasUnclustered = !!buckets["UNCLUSTERED"]?.length;
+
+    const groups = orderedIds
+      .filter((cid) => buckets[cid]?.length)
+      .map((cid) => ({
+        cid,
+        label: clusterLabelById[cid] || cid,
+        items: buckets[cid] || [],
+      }));
+
+    if (hasUnclustered) {
+      groups.push({
+        cid: "UNCLUSTERED",
+        label: "Unclustered",
+        items: buckets["UNCLUSTERED"],
+      });
+    }
+
+    return groups;
+  }, [view, hasClusters, items, clusters, clusterIdForNeed, clusterLabelById]);
 
   const renderCell = (col: ColId, it: StreamedNeedItem) => {
     switch (col) {
@@ -404,10 +559,7 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
                 e.stopPropagation();
                 toggleRow(it.need_id);
               }}
-              onPointerDown={(e) => {
-                // prevent row selection quirks while clicking the button
-                e.stopPropagation();
-              }}
+              onPointerDown={(e) => e.stopPropagation()}
             >
               {isOpen ? "–" : "+"}
             </button>
@@ -428,74 +580,68 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
       }
 
       case "need": {
-          const obj = (it.need_objective ?? "").trim();
-          const shown = obj || it.statement;
-
-          return (
-            <td key={col} className="px-2 py-1 align-top">
-              <div
-                className="line-clamp-1 overflow-hidden"
-                title={shown} // full text on hover
-              >
-                {shown}
-              </div>
-            </td>
-          );
-        }
-
-      case "ids": {
-        const display =
-          it.need_code && it.need_code.trim() ? it.need_code.trim() : shortId(it.need_id);
-
+        const obj = (it.headline ?? "").trim();
+        const shown = obj || it.statement;
         return (
-          <td key={col} className="px-2 py-1 align-top text-[10px] text-muted-foreground/70">
-            <div className="font-mono">{display}</div>
+          <td key={col} className="px-2 py-1 align-top">
+            <div className="line-clamp-1 overflow-hidden" title={shown}>
+              {shown}
+            </div>
           </td>
         );
+      }
+
+      case "ids": {
+          const display =
+            it.need_code && it.need_code.trim() ? it.need_code.trim() : shortId(it.need_id);
+
+          return (
+            <td key={col} className="px-2 py-1 align-top text-[10px] text-muted-foreground/70">
+              <div className="font-mono">{display}</div>
+            </td>
+          );
       }
     }
   };
 
   const InfoCard = ({
-      title,
-      tooltip,
-      text,
-      Icon,
-      className = "",
+    title,
+    tooltip,
+    text,
+    Icon,
+    className = "",
   }: {
-      title: string;
-      tooltip: string;
-      text?: string;
-      Icon: React.ComponentType<{ className?: string }>;
-      className?: string;
+    title: string;
+    tooltip: string;
+    text?: string;
+    Icon: React.ComponentType<{ className?: string }>;
+    className?: string;
   }) => {
-      const v = (text ?? "").trim();
-      if (!v) return null;
+    const v = (text ?? "").trim();
+    if (!v) return null;
 
-      return (
-        <div className={`rounded-md border border-border bg-background/40 p-3 ${className}`}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="inline-flex items-center gap-2 cursor-help select-none">
-                <Icon className="h-4 w-4 text-muted-foreground/80" />
-                <span className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
-                  {title}
-                </span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs max-w-xs">
-              {tooltip}
-            </TooltipContent>
-          </Tooltip>
+    return (
+      <div className={`rounded-md border border-border bg-background/40 p-3 ${className}`}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="inline-flex items-center gap-2 cursor-help select-none">
+              <Icon className="h-4 w-4 text-muted-foreground/80" />
+              <span className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
+                {title}
+              </span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs max-w-xs">
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
 
-          <div className="mt-2 text-[11px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
-            {v}
-          </div>
+        <div className="mt-2 text-[11px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+          {v}
         </div>
-      );
+      </div>
+    );
   };
-
-
 
   if (!items.length) {
     return (
@@ -505,11 +651,50 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
     );
   }
 
-  // Reorder should only apply to the non-exp columns (exp stays left)
   const reorderable = order.filter((c) => c !== "exp");
 
   return (
     <div className="w-full overflow-auto">
+      {/* view toggle row */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-background">
+          <Tabs value={view} onValueChange={(v) => setView(v as ViewMode)}>
+              <TabsList className="h-8">
+                <TabsTrigger value="flat" className="h-7 gap-1.5 text-[11px]">
+                  <List className="h-3.5 w-3.5" />
+                  Flat
+                </TabsTrigger>
+
+                <TabsTrigger
+                  value="grouped"
+                  disabled={!hasClusters}
+                  className="h-7 gap-1.5 text-[11px]"
+                  title={hasClusters ? "Group by clusters" : "Waiting for cluster results…"}
+                >
+                  {!hasClusters ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Layers className="h-3.5 w-3.5" />}
+                  Grouped
+                </TabsTrigger>
+
+                <TabsTrigger
+                  value="drivers"
+                  disabled={!hasDrivers}
+                  className="h-7 gap-1.5 text-[11px]"
+                  title={hasDrivers ? "Group by technology drivers" : "Waiting for driver tags…"}
+                >
+                  {!hasDrivers ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Compass className="h-3.5 w-3.5" />}
+                  Drivers
+                </TabsTrigger>
+              </TabsList>
+          </Tabs>
+
+          <div className="ml-auto text-[10px] text-muted-foreground">
+              {view === "grouped" && hasClusters
+                ? "Grouped by cluster theme"
+                : view === "drivers" && hasDrivers
+                ? "Grouped by technology drivers"
+                : "Streaming list"}
+          </div>
+      </div>
+
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={reorderable} strategy={horizontalListSortingStrategy}>
           <table className="w-full border-collapse text-[11px] leading-snug">
@@ -521,10 +706,7 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
 
             <thead className="sticky top-0 z-10 bg-background">
               <tr>
-                {/* exp header: no drag handle */}
                 <th className="px-1 py-1.5 border-b border-border bg-background" />
-
-                {/* reorderable headers */}
                 {reorderable.map((c) => (
                   <SortableResizableTh
                     key={c}
@@ -538,62 +720,248 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
             </thead>
 
             <tbody className="divide-y divide-border">
-              {items.map((it) => {
-                const isOpen = !!open[it.need_id];
+              {/* Grouped by clusters */}
+              {view === "grouped" && grouped ? (
+                grouped.map((g) => {
+                  const isCollapsed = !!collapsed[g.cid];
+                  const headerLabel = g.label || g.cid;
 
-                return (
-                  <React.Fragment key={it.need_id}>
-                    <tr className="hover:bg-accent/10">
-                      {order.map((c) => renderCell(c, it))}
-                    </tr>
-
-                    {isOpen && (
-                      <tr className="bg-muted/30 dark:bg-muted/20">
+                  return (
+                    <React.Fragment key={g.cid}>
+                      <tr className="bg-accent/10">
                         <td colSpan={order.length} className="px-2 py-2">
-                          <div className="mx-auto max-w-5xl">
-                            {/* Full need statement (shown only when expanded) */}
-                            <div className="mb-3 px-1">
-                              <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
-                                Need statement
-                              </div>
-                              <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
-                                {it.statement}
-                              </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="text-[11px] px-2 py-1 rounded border border-border hover:bg-accent/20"
+                              onClick={() =>
+                                setCollapsed((s) => ({ ...s, [g.cid]: !s[g.cid] }))
+                              }
+                            >
+                              {isCollapsed ? "+" : "–"}
+                            </button>
+
+                            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                              {g.cid}
+                            </Badge>
+
+                            <div className="text-[11px] font-medium text-foreground/90">
+                              {headerLabel}
                             </div>
 
-                            {/* Tiles (unchanged layout/spacing) */}
-                            <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
-                              <InfoCard
-                                className="w-full sm:w-[280px]"
-                                title="Why this matters"
-                                tooltip="The reasoning behind why this need exists."
-                                text={it.rationale}
-                                Icon={AlertTriangle}
-                              />
-
-                              <InfoCard
-                                className="w-full sm:w-[280px]"
-                                title="Why this applies here"
-                                tooltip="Why this is relevant to the current context."
-                                text={it.relevance_rationale}
-                                Icon={Search}
-                              />
-
-                              <InfoCard
-                                className="w-full sm:w-[280px]"
-                                title="Regulatory intent"
-                                tooltip="What the regulation is trying to achieve."
-                                text={it.intent_summary_section}
-                                Icon={BookOpen}
-                              />
-                            </div>
+                            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full ml-auto">
+                              {g.items.length} needs
+                            </Badge>
                           </div>
                         </td>
                       </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
+
+                      {!isCollapsed &&
+                        g.items.map((it) => {
+                          const isOpen = !!open[it.need_id];
+                          return (
+                            <React.Fragment key={it.need_id}>
+                              <tr className="hover:bg-accent/10">
+                                {order.map((c) => renderCell(c, it))}
+                              </tr>
+
+                              {isOpen && (
+                                <tr className="bg-muted/30 dark:bg-muted/20">
+                                  <td colSpan={order.length} className="px-2 py-2">
+                                    <div className="mx-auto max-w-5xl">
+                                      <div className="mb-3 px-1">
+                                        <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
+                                          Need statement
+                                        </div>
+                                        <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+                                          {it.statement}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                        <InfoCard
+                                          className="w-full sm:w-[280px]"
+                                          title="Why this matters"
+                                          tooltip="The reasoning behind why this need exists."
+                                          text={it.rationale}
+                                          Icon={AlertTriangle}
+                                        />
+
+                                        <InfoCard
+                                          className="w-full sm:w-[280px]"
+                                          title="Why this applies here"
+                                          tooltip="Why this is relevant to the current context."
+                                          text={it.relevance_rationale}
+                                          Icon={Search}
+                                        />
+
+                                        <InfoCard
+                                          className="w-full sm:w-[280px]"
+                                          title="Regulatory intent"
+                                          tooltip="What the regulation is trying to achieve."
+                                          text={it.intent_summary_trace}
+                                          Icon={BookOpen}
+                                        />
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                    </React.Fragment>
+                  );
+                })
+              ) : view === "drivers" && driversGrouped ? (
+                /* Grouped by drivers */
+                driversGrouped.map((g) => {
+                  const isCollapsed = !!collapsed[g.cid];
+                  const headerLabel = g.label || g.cid;
+
+                  return (
+                    <React.Fragment key={g.cid}>
+                      <tr className="bg-accent/10">
+                        <td colSpan={order.length} className="px-2 py-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="text-[11px] px-2 py-1 rounded border border-border hover:bg-accent/20"
+                              onClick={() =>
+                                setCollapsed((s) => ({ ...s, [g.cid]: !s[g.cid] }))
+                              }
+                            >
+                              {isCollapsed ? "+" : "–"}
+                            </button>
+
+                            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                              {g.cid}
+                            </Badge>
+
+                            <div className="text-[11px] font-medium text-foreground/90">
+                              {headerLabel}
+                            </div>
+
+                            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full ml-auto">
+                              {g.items.length} needs
+                            </Badge>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {!isCollapsed &&
+                        g.items.map((it) => {
+                          const isOpen = !!open[it.need_id];
+                          return (
+                            <React.Fragment key={it.need_id}>
+                              <tr className="hover:bg-accent/10">
+                                {order.map((c) => renderCell(c, it))}
+                              </tr>
+
+                              {isOpen && (
+                                <tr className="bg-muted/30 dark:bg-muted/20">
+                                  <td colSpan={order.length} className="px-2 py-2">
+                                    <div className="mx-auto max-w-5xl">
+                                      <div className="mb-3 px-1">
+                                        <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
+                                          Need statement
+                                        </div>
+                                        <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+                                          {it.statement}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                        <InfoCard
+                                          className="w-full sm:w-[280px]"
+                                          title="Why this matters"
+                                          tooltip="The reasoning behind why this need exists."
+                                          text={it.rationale}
+                                          Icon={AlertTriangle}
+                                        />
+
+                                        <InfoCard
+                                          className="w-full sm:w-[280px]"
+                                          title="Why this applies here"
+                                          tooltip="Why this is relevant to the current context."
+                                          text={it.relevance_rationale}
+                                          Icon={Search}
+                                        />
+
+                                        <InfoCard
+                                          className="w-full sm:w-[280px]"
+                                          title="Regulatory intent"
+                                          tooltip="What the regulation is trying to achieve."
+                                          text={it.intent_summary_trace}
+                                          Icon={BookOpen}
+                                        />
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                    </React.Fragment>
+                  );
+                })
+              ) : (
+                /* Flat mode */
+                items.map((it) => {
+                  const isOpen = !!open[it.need_id];
+                  return (
+                    <React.Fragment key={it.need_id}>
+                      <tr className="hover:bg-accent/10">
+                        {order.map((c) => renderCell(c, it))}
+                      </tr>
+
+                      {isOpen && (
+                        <tr className="bg-muted/30 dark:bg-muted/20">
+                          <td colSpan={order.length} className="px-2 py-2">
+                            <div className="mx-auto max-w-5xl">
+                              <div className="mb-3 px-1">
+                                <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
+                                  Need statement
+                                </div>
+                                <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+                                  {it.statement}
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                <InfoCard
+                                  className="w-full sm:w-[280px]"
+                                  title="Why this matters"
+                                  tooltip="The reasoning behind why this need exists."
+                                  text={it.rationale}
+                                  Icon={AlertTriangle}
+                                />
+
+                                <InfoCard
+                                  className="w-full sm:w-[280px]"
+                                  title="Why this applies here"
+                                  tooltip="Why this is relevant to the current context."
+                                  text={it.relevance_rationale}
+                                  Icon={Search}
+                                />
+
+                                <InfoCard
+                                  className="w-full sm:w-[280px]"
+                                  title="Regulatory intent"
+                                  tooltip="What the regulation is trying to achieve."
+                                  text={it.intent_summary_trace}
+                                  Icon={BookOpen}
+                                />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </SortableContext>
@@ -612,3 +980,5 @@ function StreamTable({ items }: { items: StreamedNeedItem[] }) {
     </div>
   );
 }
+
+
