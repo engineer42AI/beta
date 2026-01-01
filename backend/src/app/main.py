@@ -11,8 +11,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from .routers import agents, health
 from .routers.router_cs25 import router as cs25_router
 from .routers.router_cs25_outline import router as cs25_outline_router
+from .routers.router_cs25_needs_panel import router as cs25_needs_panel_router  # ✅ NEW
 
-from src.graphs.cs25_graph.agent_langgraph.agent_langgraph_v2 import init_runtime
+from src.graphs.cs25_graph.agent_langgraph.agent_langgraph_v2 import init_runtime as init_agent_runtime
+from src.graphs.cs25_graph.agent_langgraph.needs_panel_langgraph_v1 import init_runtime as init_needs_panel_runtime
+
 from dotenv import load_dotenv, find_dotenv
 
 # Load .env.local if present; else .env. Do this BEFORE creating the app.
@@ -77,14 +80,16 @@ async def lifespan(app: FastAPI):
             await _maybe_setup(store, checkpointer)
 
             # hand live contexts to your graph module
-            await init_runtime(store, checkpointer)
+            await init_agent_runtime(store, checkpointer)
+            await init_needs_panel_runtime(store, checkpointer)
             logger.info("LangGraph initialized with Redis store/checkpointer.")
             yield
     except Exception as e:
         logger.warning(f"Redis unavailable ({e}); using in-memory store/checkpointer.")
         mem_store = _InMemoryStore()
         mem_checkpointer = InMemorySaver()
-        await init_runtime(mem_store, mem_checkpointer)
+        await init_agent_runtime(mem_store, mem_checkpointer)
+        await init_needs_panel_runtime(mem_store, mem_checkpointer)
         yield
 
 app = FastAPI(title="Engineer42 Agents", lifespan=lifespan)
@@ -99,3 +104,4 @@ app.include_router(health.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")
 app.include_router(cs25_router,   prefix="/api")
 app.include_router(cs25_outline_router, prefix="/api")
+app.include_router(cs25_needs_panel_router, prefix="/api")  # ✅ NEW

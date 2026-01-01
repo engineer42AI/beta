@@ -5,11 +5,33 @@ import * as React from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { AlertTriangle, Search, BookOpen, Loader2, List, Layers, Compass, Wand2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Search,
+  BookOpen,
+  Loader2,
+  List,
+  Layers,
+  Compass,
+  Wand2,
+  Pin,
+  Flag,
+  Ban,
+  Check,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 
-import { NeedsSandboxPanel, type NeedsSandboxDraft } from "./NeedsSandboxPanel";
+import {
+  NeedsSandboxPanel,
+  type NeedsSandboxDraft,
+  type NeedsSandboxApplyPatch,
+  type NeedsDecisionsMap,
+  type NeedsEvalsMap,
+  type NeedDecisionStatus,
+} from "./NeedsSandboxPanel";
 
 import {
   DndContext,
@@ -37,8 +59,8 @@ export type FrozenNeedRow = {
 
 /** streamed needs (built from frozen selection) */
 export type StreamedNeedItem = {
-  need_id: string;        // stable internal id
-  need_code?: string;     // display id like N-03-01 (optional)
+  need_id: string; // stable internal id
+  need_code?: string; // display id like N-03-01 (optional)
   trace_uuid: string;
   path_labels: string[];
 
@@ -55,16 +77,16 @@ export type StreamedNeedItem = {
 
 /** clustering payload from backend: needsTables.clusters */
 export type NeedsCluster = {
-  cluster_id: string;        // e.g. C-01
+  cluster_id: string; // e.g. C-01
   size: number;
-  label: string;             // human label
+  label: string; // human label
   need_ids: string[];
 };
 
 export type NeedsClusterResult = {
   k: number;
   map: Record<string, string>; // need_id -> cluster_id
-  clusters: NeedsCluster[];    // ordered (largest first)
+  clusters: NeedsCluster[]; // ordered (largest first)
 };
 
 export type NeedStrand =
@@ -72,7 +94,7 @@ export type NeedStrand =
   | "MATERIALS"
   | "MANUFACTURING_METHOD"
   | "INTEGRATION_ENVIRONMENT"
-  | "OTHER"
+  | "OTHER";
 
 export type NeedsStrandsResult = {
   map: Record<string, { strand: NeedStrand; confidence?: number; reason?: string }>;
@@ -87,6 +109,7 @@ type Props =
     }
   | {
       kind: "stream";
+      tabId: string;
       items: StreamedNeedItem[];
       frozenAt?: string;
       streaming?: boolean;
@@ -121,35 +144,33 @@ function fullPath(path: string[]) {
   return (path ?? []).join(" / ");
 }
 
-function RelevanceDot({ v }: { v: boolean | undefined }) {
-  const cls =
-    v === true
-      ? "bg-emerald-600"
-      : v === false
-      ? "bg-red-500"
-      : "bg-muted-foreground/40";
-  const label = v === true ? "Relevant" : v === false ? "Not relevant" : "—";
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className={`inline-block h-2 w-2 rounded-full ${cls}`} title={label} aria-label={label} />
-      <span className="text-[10px] text-muted-foreground">{label}</span>
-    </span>
-  );
-}
-
 function lineClampClass(n: 1 | 2 | 3 | 4) {
   return `line-clamp-${n}`;
 }
 
+function statusMeta(status: NeedDecisionStatus) {
+  switch (status) {
+    case "pinned":
+      return { label: "Pinned", Icon: Pin };
+    case "flagged":
+      return { label: "Flagged", Icon: Flag };
+    case "descoped":
+      return { label: "Descoped", Icon: Ban };
+    default:
+      return { label: "Active", Icon: Check };
+  }
+}
+
 /* ---------------- movable + resizable columns ---------------- */
 
-type ColId = "exp" | "clause" | "need" | "ids";
+type ColId = "exp" | "clause" | "need" | "ids" | "status";
 
 const DEFAULT_WIDTHS: Record<ColId, number> = {
   exp: 34,
   clause: 260,
   need: 820,
-  ids: 160,
+  ids: 180,
+  status: 220,
 };
 
 const COL_LABEL: Record<ColId, string> = {
@@ -157,6 +178,7 @@ const COL_LABEL: Record<ColId, string> = {
   clause: "Clause",
   need: "Need",
   ids: "ID",
+  status: "Status",
 };
 
 function clampWidth(n: number, col?: ColId) {
@@ -230,8 +252,7 @@ function SortableResizableTh({
   widthPx: number;
   onBeginResize: (id: ColId, e: React.PointerEvent) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
   return (
     <th
@@ -287,51 +308,54 @@ export function NeedsTableUI(props: Props) {
           </Badge>
 
           {props.kind === "stream" && (
-              <>
-                {typeof props.done === "number" && typeof props.total === "number" && (
-                  <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
-                    <span className="inline-flex items-center gap-1.5">
-                      {props.streaming && <Loader2 className="h-3 w-3 animate-spin" />}
-                      certification clauses {props.done}/{props.total}
-                    </span>
-                  </Badge>
+            <>
+              {typeof props.done === "number" && typeof props.total === "number" && (
+                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                  <span className="inline-flex items-center gap-1.5">
+                    {props.streaming && <Loader2 className="h-3 w-3 animate-spin" />}
+                    certification clauses {props.done}/{props.total}
+                  </span>
+                </Badge>
+              )}
+
+              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                {clusterCount > 0 ? (
+                  `${clusterCount} clusters`
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    clusters pending
+                  </span>
                 )}
+              </Badge>
 
-                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
-                  {clusterCount > 0 ? (
-                    `${clusterCount} clusters`
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      clusters pending
-                    </span>
-                  )}
-                </Badge>
-
-                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
-                  {props.kind === "stream" ? (
-                    strandCount > 0 ? `${strandCount} tagged` : (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        drivers pending
-                      </span>
-                    )
-                  ) : null}
-                </Badge>
-              </>
+              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                {strandCount > 0 ? (
+                  `${strandCount} tagged`
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    drivers pending
+                  </span>
+                )}
+              </Badge>
+            </>
           )}
 
           {props.frozenAt && (
-            <div className="ml-auto text-[10px] text-muted-foreground tabular-nums">
-              frozen {props.frozenAt}
-            </div>
+            <div className="ml-auto text-[10px] text-muted-foreground tabular-nums">frozen {props.frozenAt}</div>
           )}
         </div>
 
         {props.kind === "snapshot" ? (
           <SnapshotTable rows={props.rows} />
         ) : (
-          <StreamTable items={props.items} clusters={props.clusters} strands={props.strands} />
+          <StreamTable
+            tabId={props.tabId}
+            items={props.items}
+            clusters={props.clusters}
+            strands={props.strands}
+          />
         )}
       </Card>
     </TooltipProvider>
@@ -376,16 +400,11 @@ function SnapshotTable({ rows }: { rows: FrozenNeedRow[] }) {
               <tr key={r.trace_uuid} className="hover:bg-accent/10">
                 <td className="px-2 py-1 align-top">
                   <div className="font-medium text-foreground/90">{lastLabel(r.path_labels)}</div>
-                  <div className="text-[10px] text-muted-foreground/70 line-clamp-2">
-                    {fullPath(r.path_labels)}
-                  </div>
+                  <div className="text-[10px] text-muted-foreground/70 line-clamp-2">{fullPath(r.path_labels)}</div>
                 </td>
 
                 <td className="px-2 py-1 align-top">
-                  <RelevanceDot v={r.relevant} />
-                  <div className="font-mono text-[10px] text-muted-foreground/60 mt-1">
-                    {shortId(r.trace_uuid)}
-                  </div>
+                  <div className="font-mono text-[10px] text-muted-foreground/60">{shortId(r.trace_uuid)}</div>
                 </td>
 
                 <td className="px-2 py-1 align-top">
@@ -397,38 +416,40 @@ function SnapshotTable({ rows }: { rows: FrozenNeedRow[] }) {
         </tbody>
       </table>
     </div>
-
-
-
   );
 }
 
-/* ---------------- streamed table: NEED-focused + expandable row ---------------- */
+/* ---------------- streamed table ---------------- */
 
 function StreamTable({
+  tabId,
   items,
   clusters,
   strands,
 }: {
+  tabId: string;
   items: StreamedNeedItem[];
   clusters?: NeedsClusterResult;
   strands?: NeedsStrandsResult;
 }) {
-
   // NOTE: order is only for reorderable columns (exclude exp so it stays pinned)
   const [order, setOrder] = React.useState<ColId[]>(() => {
     try {
       const raw = localStorage.getItem("e42.needsTable.colOrder.v1");
       if (raw) {
         const parsed = JSON.parse(raw);
-        const allowed: ColId[] = ["clause", "need", "ids"];
-        const cleaned = (Array.isArray(parsed) ? parsed : []).filter((c): c is ColId =>
-          allowed.includes(c)
-        );
+        const allowed: ColId[] = ["clause", "need", "ids", "status"];
+        let cleaned = (Array.isArray(parsed) ? parsed : []).filter((c): c is ColId => allowed.includes(c));
+
+        // ensure new cols appear even for old saved layouts
+        for (const mustHave of ["clause", "need", "ids", "status"] as ColId[]) {
+          if (!cleaned.includes(mustHave)) cleaned.push(mustHave);
+        }
+
         return ["exp", ...cleaned];
       }
     } catch {}
-    return ["exp", "clause", "need", "ids"];
+    return ["exp", "clause", "need", "ids", "status"];
   });
 
   // persist without exp (so we don't break older saves)
@@ -437,15 +458,6 @@ function StreamTable({
       localStorage.setItem("e42.needsTable.colOrder.v1", JSON.stringify(order.filter((c) => c !== "exp")));
     } catch {}
   }, [order]);
-
-  const collapseAllGroups = React.useCallback(() => {
-      const next: Record<string, boolean> = {};
-      for (const c of clusters?.clusters ?? []) next[c.cluster_id] = true;
-      // include UNCLUSTERED if it exists later
-      next["UNCLUSTERED"] = true;
-      setCollapsed(next);
-  }, [clusters]);
-
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const { widths, beginResize, setWidths } = useColumnResizer();
@@ -463,10 +475,17 @@ function StreamTable({
   const hasClusters = !!clusters?.clusters?.length;
   const hasDrivers = Object.keys(strands?.map ?? {}).length > 0;
 
+  const collapseAllGroups = React.useCallback(() => {
+    const next: Record<string, boolean> = {};
+    for (const c of clusters?.clusters ?? []) next[c.cluster_id] = true;
+    next["UNCLUSTERED"] = true;
+    setCollapsed(next);
+  }, [clusters]);
+
   React.useEffect(() => {
-      if (!hasClusters) return;
-      setView((v) => (v === "flat" ? "grouped" : v)); // don't override user's choice
-      collapseAllGroups();
+    if (!hasClusters) return;
+    setView((v) => (v === "flat" ? "grouped" : v)); // don't override user's choice
+    collapseAllGroups();
   }, [hasClusters, collapseAllGroups]);
 
   const onDragEnd = (e: DragEndEvent) => {
@@ -481,56 +500,141 @@ function StreamTable({
   };
 
   const clusterIdForNeed = React.useCallback(
-    (needId: string) => {
-      const cid = clusters?.map?.[needId];
-      return cid || "UNCLUSTERED";
-    },
+    (needId: string) => clusters?.map?.[needId] || "UNCLUSTERED",
     [clusters]
   );
 
-  // Drawer code
+  const strandForNeed = React.useCallback(
+    (needId: string) => (strands?.map?.[needId]?.strand as NeedStrand) ?? "OTHER",
+    [strands]
+  );
+
+  /* -------- decisions + evals persistence (per tab) -------- */
+
+  const DECISIONS_KEY = React.useMemo(() => `e42.needsTable.decisions.${tabId}.v1`, [tabId]);
+  const EVALS_KEY = React.useMemo(() => `e42.needsTable.evals.${tabId}.v1`, [tabId]);
+
+  const [decisions, setDecisions] = React.useState<NeedsDecisionsMap>(() => {
+    if (!tabId) return {};
+    try {
+      const raw = localStorage.getItem(DECISIONS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return {};
+  });
+
+  const [evals, setEvals] = React.useState<NeedsEvalsMap>(() => {
+    if (!tabId) return {};
+    try {
+      const raw = localStorage.getItem(EVALS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return {};
+  });
+
+  // reload if tabId changes (navigate between tabs)
+  React.useEffect(() => {
+    if (!tabId) return;
+    try {
+      const rawD = localStorage.getItem(DECISIONS_KEY);
+      setDecisions(rawD ? JSON.parse(rawD) : {});
+    } catch {
+      setDecisions({});
+    }
+    try {
+      const rawE = localStorage.getItem(EVALS_KEY);
+      setEvals(rawE ? JSON.parse(rawE) : {});
+    } catch {
+      setEvals({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [DECISIONS_KEY, EVALS_KEY]);
+
+  React.useEffect(() => {
+    if (!tabId) return;
+    try {
+      localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions ?? {}));
+    } catch {}
+  }, [tabId, DECISIONS_KEY, decisions]);
+
+  React.useEffect(() => {
+    if (!tabId) return;
+    try {
+      localStorage.setItem(EVALS_KEY, JSON.stringify(evals ?? {}));
+    } catch {}
+  }, [tabId, EVALS_KEY, evals]);
+
+  const effectiveStatus = React.useCallback(
+    (needId: string): NeedDecisionStatus => decisions?.[needId]?.status ?? "active",
+    [decisions]
+  );
+
+  const [showDescoped, setShowDescoped] = React.useState(false);
+
+  const visibleItems = React.useMemo(() => {
+    // keep deterministic ordering: pinned -> flagged -> active -> descoped (then original order)
+    const rank = (s: NeedDecisionStatus) =>
+      s === "pinned" ? 0 : s === "flagged" ? 1 : s === "active" ? 2 : 3;
+
+    const base = showDescoped ? items : items.filter((it) => effectiveStatus(it.need_id) !== "descoped");
+
+    return [...base].sort((a, b) => {
+      const ra = rank(effectiveStatus(a.need_id));
+      const rb = rank(effectiveStatus(b.need_id));
+      if (ra !== rb) return ra - rb;
+      return 0;
+    });
+  }, [items, showDescoped, effectiveStatus]);
+
+  const decisionCounts = React.useMemo(() => {
+    let pinned = 0,
+      flagged = 0,
+      descoped = 0,
+      active = 0;
+    for (const it of items) {
+      const s = effectiveStatus(it.need_id);
+      if (s === "pinned") pinned += 1;
+      else if (s === "flagged") flagged += 1;
+      else if (s === "descoped") descoped += 1;
+      else active += 1;
+    }
+    const evalCount = Object.keys(evals ?? {}).length;
+    return { pinned, flagged, descoped, active, evals: evalCount, total: items.length };
+  }, [items, effectiveStatus, evals]);
+
+  /* -------- sandbox drawer -------- */
+
   const [sandboxOpen, setSandboxOpen] = React.useState(false);
   const [sandboxDraft, setSandboxDraft] = React.useState<NeedsSandboxDraft | null>(null);
 
   const openSandbox = React.useCallback(() => {
-      setSandboxDraft({
-        createdAt: new Date().toISOString(),
-        view,
-        items: safeClone(items),
-        clusters: safeClone(clusters),
-        strands: safeClone(strands),
-      });
-      setSandboxOpen(true);
+    setSandboxDraft({
+      createdAt: new Date().toISOString(),
+      view,
+      // IMPORTANT: pass the FULL dataset so user can reactivate descoped items
+      items: safeClone(items),
+      clusters: safeClone(clusters),
+      strands: safeClone(strands),
+    });
+    setSandboxOpen(true);
   }, [view, items, clusters, strands]);
 
-  // ✅ Add it right here (next to clusterIdForNeed)
-  const strandForNeed = React.useCallback(
-      (needId: string) => strands?.map?.[needId]?.strand ?? "OTHER",
-      [strands]
+  const onSandboxApply = React.useCallback(
+    (patch: NeedsSandboxApplyPatch) => {
+      // patch contains the overlay maps (persistable)
+      setDecisions(patch.decisions ?? {});
+      setEvals(patch.evals ?? {});
+      setSandboxOpen(false);
+      setSandboxDraft(null);
+
+      // UX: if user descoped a lot, keep table clean
+      // (but don't force; user can toggle Show descoped)
+      // no-op beyond persistence
+    },
+    []
   );
 
-  const driversGrouped = React.useMemo(() => {
-      if (view !== "drivers" || !hasDrivers) return null;
-
-      const buckets: Record<string, StreamedNeedItem[]> = {};
-      for (const it of items) {
-        const s = strandForNeed(it.need_id);
-        (buckets[s] ||= []).push(it);
-      }
-
-      const strandOrder: NeedStrand[] = [
-          "FUNCTIONAL_DESIGN_PERFORMANCE",
-          "MATERIALS",
-          "MANUFACTURING_METHOD",
-          "INTEGRATION_ENVIRONMENT",
-          "OTHER",
-      ];
-
-      return strandOrder
-          .filter((k) => buckets[k]?.length)
-          .map((k) => ({ cid: k, label: k, items: buckets[k] }));
-  }, [view, hasDrivers, items, strandForNeed]);
-
+  /* -------- group views -------- */
 
   const clusterLabelById = React.useMemo(() => {
     const m: Record<string, string> = {};
@@ -542,7 +646,7 @@ function StreamTable({
     if (view !== "grouped" || !hasClusters) return null;
 
     const buckets: Record<string, StreamedNeedItem[]> = {};
-    for (const it of items) {
+    for (const it of visibleItems) {
       const cid = clusterIdForNeed(it.need_id);
       (buckets[cid] ||= []).push(it);
     }
@@ -567,9 +671,37 @@ function StreamTable({
     }
 
     return groups;
-  }, [view, hasClusters, items, clusters, clusterIdForNeed, clusterLabelById]);
+  }, [view, hasClusters, visibleItems, clusters, clusterIdForNeed, clusterLabelById]);
+
+  const driversGrouped = React.useMemo(() => {
+    if (view !== "drivers" || !hasDrivers) return null;
+
+    const buckets: Record<string, StreamedNeedItem[]> = {};
+    for (const it of visibleItems) {
+      const s = strandForNeed(it.need_id);
+      (buckets[s] ||= []).push(it);
+    }
+
+    const strandOrder: NeedStrand[] = [
+      "FUNCTIONAL_DESIGN_PERFORMANCE",
+      "MATERIALS",
+      "MANUFACTURING_METHOD",
+      "INTEGRATION_ENVIRONMENT",
+      "OTHER",
+    ];
+
+    return strandOrder
+      .filter((k) => buckets[k]?.length)
+      .map((k) => ({ cid: k, label: k, items: buckets[k] }));
+  }, [view, hasDrivers, visibleItems, strandForNeed]);
+
+  /* -------- render helpers -------- */
 
   const renderCell = (col: ColId, it: StreamedNeedItem) => {
+    const status = effectiveStatus(it.need_id);
+    const eval0 = evals?.[it.need_id];
+    const mutedRow = status === "descoped";
+
     switch (col) {
       case "exp": {
         const isOpen = !!open[it.need_id];
@@ -601,7 +733,7 @@ function StreamTable({
         const parts = Array.isArray(it.path_labels) ? it.path_labels : [];
         const last = parts.length ? parts[parts.length - 1] : "(unknown clause)";
         return (
-          <td key={col} className="px-2 py-1 align-top">
+          <td key={col} className={["px-2 py-1 align-top", mutedRow ? "opacity-70" : ""].join(" ")}>
             <div className="text-[11px] font-medium text-foreground truncate" title={last}>
               {last}
             </div>
@@ -613,7 +745,7 @@ function StreamTable({
         const obj = (it.headline ?? "").trim();
         const shown = obj || it.statement;
         return (
-          <td key={col} className="px-2 py-1 align-top">
+          <td key={col} className={["px-2 py-1 align-top", mutedRow ? "opacity-70" : ""].join(" ")}>
             <div className="line-clamp-1 overflow-hidden" title={shown}>
               {shown}
             </div>
@@ -622,12 +754,42 @@ function StreamTable({
       }
 
       case "ids": {
-          const display =
-            it.need_code && it.need_code.trim() ? it.need_code.trim() : shortId(it.need_id);
+          const display = it.need_code && it.need_code.trim() ? it.need_code.trim() : shortId(it.need_id);
 
           return (
-            <td key={col} className="px-2 py-1 align-top text-[10px] text-muted-foreground/70">
-              <div className="font-mono">{display}</div>
+            <td key={col} className={["px-2 py-1 align-top text-[10px]", mutedRow ? "opacity-70" : ""].join(" ")}>
+              <div className="font-mono text-muted-foreground/80">{display}</div>
+            </td>
+          );
+      }
+
+      case "status": {
+          const meta = statusMeta(status);
+          const SIcon = meta.Icon;
+
+          const evalChip =
+            eval0 && eval0.ok
+              ? eval0.trigger
+                ? `applies ${Math.round((eval0.confidence ?? 0) * 100)}%`
+                : `not ${Math.round((eval0.confidence ?? 0) * 100)}%`
+              : eval0 && !eval0.ok
+              ? "eval error"
+              : "";
+
+          return (
+            <td key={col} className={["px-2 py-1 align-top text-[10px]", mutedRow ? "opacity-70" : ""].join(" ")}>
+              <div className="mt-0.5 flex flex-wrap items-center justify-end gap-1.5">
+                <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-2 py-0.5 text-[10px] text-muted-foreground">
+                  <SIcon className="h-3 w-3" />
+                  {meta.label}
+                </span>
+
+                {evalChip ? (
+                  <span className="rounded-full border border-border/70 bg-background/60 px-2 py-0.5 text-[10px] text-muted-foreground">
+                    {evalChip}
+                  </span>
+                ) : null}
+              </div>
             </td>
           );
       }
@@ -666,380 +828,387 @@ function StreamTable({
           </TooltipContent>
         </Tooltip>
 
-        <div className="mt-2 text-[11px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
-          {v}
-        </div>
+        <div className="mt-2 text-[11px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">{v}</div>
       </div>
     );
   };
 
   if (!items.length) {
-    return (
-      <div className="px-3 py-4 text-[12px] text-muted-foreground italic">
-        Waiting for needs…
-      </div>
-    );
+    return <div className="px-3 py-4 text-[12px] text-muted-foreground italic">Waiting for needs…</div>;
   }
 
   const reorderable = order.filter((c) => c !== "exp");
 
   return (
     <>
-        <div className="w-full overflow-auto">
-          {/* view toggle row */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-background">
-              <Tabs value={view} onValueChange={(v) => setView(v as ViewMode)}>
-                  <TabsList className="h-8">
-                    <TabsTrigger value="flat" className="h-7 gap-1.5 text-[11px]">
-                      <List className="h-3.5 w-3.5" />
-                      Flat
-                    </TabsTrigger>
+      <div className="w-full overflow-auto">
+        {/* view toggle row */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-background">
+          <Tabs value={view} onValueChange={(v) => setView(v as ViewMode)}>
+            <TabsList className="h-8">
+              <TabsTrigger value="flat" className="h-7 gap-1.5 text-[11px]">
+                <List className="h-3.5 w-3.5" />
+                Flat
+              </TabsTrigger>
 
-                    <TabsTrigger
-                      value="grouped"
-                      disabled={!hasClusters}
-                      className="h-7 gap-1.5 text-[11px]"
-                      title={hasClusters ? "Group by clusters" : "Waiting for cluster results…"}
-                    >
-                      {!hasClusters ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Layers className="h-3.5 w-3.5" />}
-                      Grouped
-                    </TabsTrigger>
+              <TabsTrigger
+                value="grouped"
+                disabled={!hasClusters}
+                className="h-7 gap-1.5 text-[11px]"
+                title={hasClusters ? "Group by clusters" : "Waiting for cluster results…"}
+              >
+                {!hasClusters ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Layers className="h-3.5 w-3.5" />}
+                Grouped
+              </TabsTrigger>
 
-                    <TabsTrigger
-                      value="drivers"
-                      disabled={!hasDrivers}
-                      className="h-7 gap-1.5 text-[11px]"
-                      title={hasDrivers ? "Group by technology drivers" : "Waiting for driver tags…"}
-                    >
-                      {!hasDrivers ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Compass className="h-3.5 w-3.5" />}
-                      Drivers
-                    </TabsTrigger>
-                  </TabsList>
-              </Tabs>
+              <TabsTrigger
+                value="drivers"
+                disabled={!hasDrivers}
+                className="h-7 gap-1.5 text-[11px]"
+                title={hasDrivers ? "Group by technology drivers" : "Waiting for driver tags…"}
+              >
+                {!hasDrivers ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Compass className="h-3.5 w-3.5" />
+                )}
+                Drivers
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-              <div className="ml-auto flex items-center gap-2">
-                <div className="text-[10px] text-muted-foreground">
-                  {view === "grouped" && hasClusters
-                    ? "Grouped by cluster theme"
-                    : view === "drivers" && hasDrivers
-                    ? "Grouped by technology drivers"
-                    : "Streaming list"}
-                </div>
-
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-[11px] rounded-md border border-border/60 hover:bg-accent/20"
-                      onClick={openSandbox}
-                      type="button"
-                    >
-                      <Wand2 className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
-                      Refine
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs max-w-xs">
-                    Open a sandbox copy to triage, rank, and narrow your working set (no changes applied yet).
-                  </TooltipContent>
-                </Tooltip>
-              </div>
+          <div className="ml-2 flex items-center gap-2">
+            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+              {decisionCounts.pinned} pinned
+            </Badge>
+            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+              {decisionCounts.flagged} flagged
+            </Badge>
+            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+              {decisionCounts.descoped} descoped
+            </Badge>
+            <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+              {decisionCounts.evals} evals
+            </Badge>
           </div>
 
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-            <SortableContext items={reorderable} strategy={horizontalListSortingStrategy}>
-              <table className="w-full border-collapse text-[11px] leading-snug">
-                <colgroup>
-                  {order.map((c) => (
-                    <col key={c} style={{ width: widths[c] ?? DEFAULT_WIDTHS[c] }} />
-                  ))}
-                </colgroup>
-
-                <thead className="sticky top-0 z-10 bg-background">
-                  <tr>
-                    <th className="px-1 py-1.5 border-b border-border bg-background" />
-                    {reorderable.map((c) => (
-                      <SortableResizableTh
-                        key={c}
-                        id={c}
-                        label={COL_LABEL[c]}
-                        widthPx={widths[c] ?? DEFAULT_WIDTHS[c]}
-                        onBeginResize={beginResize}
-                      />
-                    ))}
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-border">
-                  {/* Grouped by clusters */}
-                  {view === "grouped" && grouped ? (
-                    grouped.map((g) => {
-                      const isCollapsed = !!collapsed[g.cid];
-                      const headerLabel = g.label || g.cid;
-
-                      return (
-                        <React.Fragment key={g.cid}>
-                          <tr className="bg-accent/10">
-                            <td colSpan={order.length} className="px-2 py-2">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  className="text-[11px] px-2 py-1 rounded border border-border hover:bg-accent/20"
-                                  onClick={() =>
-                                    setCollapsed((s) => ({ ...s, [g.cid]: !s[g.cid] }))
-                                  }
-                                >
-                                  {isCollapsed ? "+" : "–"}
-                                </button>
-
-                                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
-                                  {g.cid}
-                                </Badge>
-
-                                <div className="text-[11px] font-medium text-foreground/90">
-                                  {headerLabel}
-                                </div>
-
-                                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full ml-auto">
-                                  {g.items.length} needs
-                                </Badge>
-                              </div>
-                            </td>
-                          </tr>
-
-                          {!isCollapsed &&
-                            g.items.map((it) => {
-                              const isOpen = !!open[it.need_id];
-                              return (
-                                <React.Fragment key={it.need_id}>
-                                  <tr className="hover:bg-accent/10">
-                                    {order.map((c) => renderCell(c, it))}
-                                  </tr>
-
-                                  {isOpen && (
-                                    <tr className="bg-muted/30 dark:bg-muted/20">
-                                      <td colSpan={order.length} className="px-2 py-2">
-                                        <div className="mx-auto max-w-5xl">
-                                          <div className="mb-3 px-1">
-                                            <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
-                                              Need statement
-                                            </div>
-                                            <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
-                                              {it.statement}
-                                            </div>
-                                          </div>
-
-                                          <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
-                                            <InfoCard
-                                              className="w-full sm:w-[280px]"
-                                              title="Why this matters"
-                                              tooltip="The reasoning behind why this need exists."
-                                              text={it.rationale}
-                                              Icon={AlertTriangle}
-                                            />
-
-                                            <InfoCard
-                                              className="w-full sm:w-[280px]"
-                                              title="Why this applies here"
-                                              tooltip="Why this is relevant to the current context."
-                                              text={it.relevance_rationale}
-                                              Icon={Search}
-                                            />
-
-                                            <InfoCard
-                                              className="w-full sm:w-[280px]"
-                                              title="Regulatory intent"
-                                              tooltip="What the regulation is trying to achieve."
-                                              text={it.intent_summary_trace}
-                                              Icon={BookOpen}
-                                            />
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              );
-                            })}
-                        </React.Fragment>
-                      );
-                    })
-                  ) : view === "drivers" && driversGrouped ? (
-                    /* Grouped by drivers */
-                    driversGrouped.map((g) => {
-                      const isCollapsed = !!collapsed[g.cid];
-                      const headerLabel = g.label || g.cid;
-
-                      return (
-                        <React.Fragment key={g.cid}>
-                          <tr className="bg-accent/10">
-                            <td colSpan={order.length} className="px-2 py-2">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  className="text-[11px] px-2 py-1 rounded border border-border hover:bg-accent/20"
-                                  onClick={() =>
-                                    setCollapsed((s) => ({ ...s, [g.cid]: !s[g.cid] }))
-                                  }
-                                >
-                                  {isCollapsed ? "+" : "–"}
-                                </button>
-
-                                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
-                                  {g.cid}
-                                </Badge>
-
-                                <div className="text-[11px] font-medium text-foreground/90">
-                                  {headerLabel}
-                                </div>
-
-                                <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full ml-auto">
-                                  {g.items.length} needs
-                                </Badge>
-                              </div>
-                            </td>
-                          </tr>
-
-                          {!isCollapsed &&
-                            g.items.map((it) => {
-                              const isOpen = !!open[it.need_id];
-                              return (
-                                <React.Fragment key={it.need_id}>
-                                  <tr className="hover:bg-accent/10">
-                                    {order.map((c) => renderCell(c, it))}
-                                  </tr>
-
-                                  {isOpen && (
-                                    <tr className="bg-muted/30 dark:bg-muted/20">
-                                      <td colSpan={order.length} className="px-2 py-2">
-                                        <div className="mx-auto max-w-5xl">
-                                          <div className="mb-3 px-1">
-                                            <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
-                                              Need statement
-                                            </div>
-                                            <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
-                                              {it.statement}
-                                            </div>
-                                          </div>
-
-                                          <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
-                                            <InfoCard
-                                              className="w-full sm:w-[280px]"
-                                              title="Why this matters"
-                                              tooltip="The reasoning behind why this need exists."
-                                              text={it.rationale}
-                                              Icon={AlertTriangle}
-                                            />
-
-                                            <InfoCard
-                                              className="w-full sm:w-[280px]"
-                                              title="Why this applies here"
-                                              tooltip="Why this is relevant to the current context."
-                                              text={it.relevance_rationale}
-                                              Icon={Search}
-                                            />
-
-                                            <InfoCard
-                                              className="w-full sm:w-[280px]"
-                                              title="Regulatory intent"
-                                              tooltip="What the regulation is trying to achieve."
-                                              text={it.intent_summary_trace}
-                                              Icon={BookOpen}
-                                            />
-                                          </div>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )}
-                                </React.Fragment>
-                              );
-                            })}
-                        </React.Fragment>
-                      );
-                    })
-                  ) : (
-                    /* Flat mode */
-                    items.map((it) => {
-                      const isOpen = !!open[it.need_id];
-                      return (
-                        <React.Fragment key={it.need_id}>
-                          <tr className="hover:bg-accent/10">
-                            {order.map((c) => renderCell(c, it))}
-                          </tr>
-
-                          {isOpen && (
-                            <tr className="bg-muted/30 dark:bg-muted/20">
-                              <td colSpan={order.length} className="px-2 py-2">
-                                <div className="mx-auto max-w-5xl">
-                                  <div className="mb-3 px-1">
-                                    <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
-                                      Need statement
-                                    </div>
-                                    <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
-                                      {it.statement}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
-                                    <InfoCard
-                                      className="w-full sm:w-[280px]"
-                                      title="Why this matters"
-                                      tooltip="The reasoning behind why this need exists."
-                                      text={it.rationale}
-                                      Icon={AlertTriangle}
-                                    />
-
-                                    <InfoCard
-                                      className="w-full sm:w-[280px]"
-                                      title="Why this applies here"
-                                      tooltip="Why this is relevant to the current context."
-                                      text={it.relevance_rationale}
-                                      Icon={Search}
-                                    />
-
-                                    <InfoCard
-                                      className="w-full sm:w-[280px]"
-                                      title="Regulatory intent"
-                                      tooltip="What the regulation is trying to achieve."
-                                      text={it.intent_summary_trace}
-                                      Icon={BookOpen}
-                                    />
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </SortableContext>
-          </DndContext>
-
-          <div className="px-3 py-2 text-[10px] text-muted-foreground/70 border-t border-border">
-            Tip: use + to expand. Drag “⋮⋮” to reorder columns. Drag the thin right-edge handle to resize.
-            <button
-              className="ml-2 underline underline-offset-2 hover:text-foreground"
-              onClick={() => setWidths({ ...DEFAULT_WIDTHS })}
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px] rounded-md border border-border/60 hover:bg-accent/20"
+              onClick={() => setShowDescoped((v) => !v)}
               type="button"
+              title={showDescoped ? "Hide descoped rows" : "Show descoped rows"}
             >
-              reset widths
-            </button>
+              {showDescoped ? <EyeOff className="h-3.5 w-3.5 mr-1.5" /> : <Eye className="h-3.5 w-3.5 mr-1.5" />}
+              {showDescoped ? "Hide descoped" : "Show descoped"}
+            </Button>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-[11px] rounded-md border border-border/60 hover:bg-accent/20"
+                  onClick={openSandbox}
+                  type="button"
+                >
+                  <Wand2 className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+                  Refine
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs max-w-xs">
+                Open a sandbox copy to triage and narrow your working set. Apply changes back to this table.
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
-        {sandboxOpen && sandboxDraft && (
-          <NeedsSandboxPanel
-            open
-            draft={sandboxDraft}
-            onClose={() => { setSandboxOpen(false); setSandboxDraft(null); }}
-            onApply={() => setSandboxOpen(false)}
-          />
-        )}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={reorderable} strategy={horizontalListSortingStrategy}>
+            <table className="w-full border-collapse text-[11px] leading-snug">
+              <colgroup>
+                {order.map((c) => (
+                  <col key={c} style={{ width: widths[c] ?? DEFAULT_WIDTHS[c] }} />
+                ))}
+              </colgroup>
+
+              <thead className="sticky top-0 z-10 bg-background">
+                <tr>
+                  <th className="px-1 py-1.5 border-b border-border bg-background" />
+                  {reorderable.map((c) => (
+                    <SortableResizableTh
+                      key={c}
+                      id={c}
+                      label={COL_LABEL[c]}
+                      widthPx={widths[c] ?? DEFAULT_WIDTHS[c]}
+                      onBeginResize={beginResize}
+                    />
+                  ))}
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-border">
+                {/* Grouped by clusters */}
+                {view === "grouped" && grouped ? (
+                  grouped.map((g) => {
+                    const isCollapsed = !!collapsed[g.cid];
+                    const headerLabel = g.label || g.cid;
+
+                    return (
+                      <React.Fragment key={g.cid}>
+                        <tr className="bg-accent/10">
+                          <td colSpan={order.length} className="px-2 py-2">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="text-[11px] px-2 py-1 rounded border border-border hover:bg-accent/20"
+                                onClick={() => setCollapsed((s) => ({ ...s, [g.cid]: !s[g.cid] }))}
+                              >
+                                {isCollapsed ? "+" : "–"}
+                              </button>
+
+                              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                                {g.cid}
+                              </Badge>
+
+                              <div className="text-[11px] font-medium text-foreground/90">{headerLabel}</div>
+
+                              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full ml-auto">
+                                {g.items.length} needs
+                              </Badge>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {!isCollapsed &&
+                          g.items.map((it) => {
+                            const isOpen = !!open[it.need_id];
+                            return (
+                              <React.Fragment key={it.need_id}>
+                                <tr className="hover:bg-accent/10">{order.map((c) => renderCell(c, it))}</tr>
+
+                                {isOpen && (
+                                  <tr className="bg-muted/30 dark:bg-muted/20">
+                                    <td colSpan={order.length} className="px-2 py-2">
+                                      <div className="mx-auto max-w-5xl">
+                                        <div className="mb-3 px-1">
+                                          <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
+                                            Need statement
+                                          </div>
+                                          <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+                                            {it.statement}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                          <InfoCard
+                                            className="w-full sm:w-[280px]"
+                                            title="Why this matters"
+                                            tooltip="The reasoning behind why this need exists."
+                                            text={it.rationale}
+                                            Icon={AlertTriangle}
+                                          />
+
+                                          <InfoCard
+                                            className="w-full sm:w-[280px]"
+                                            title="Why this applies here"
+                                            tooltip="Why this is relevant to the current context."
+                                            text={it.relevance_rationale}
+                                            Icon={Search}
+                                          />
+
+                                          <InfoCard
+                                            className="w-full sm:w-[280px]"
+                                            title="Regulatory intent"
+                                            tooltip="What the regulation is trying to achieve."
+                                            text={it.intent_summary_trace}
+                                            Icon={BookOpen}
+                                          />
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                      </React.Fragment>
+                    );
+                  })
+                ) : view === "drivers" && driversGrouped ? (
+                  /* Grouped by drivers */
+                  driversGrouped.map((g) => {
+                    const isCollapsed = !!collapsed[g.cid];
+                    const headerLabel = g.label || g.cid;
+
+                    return (
+                      <React.Fragment key={g.cid}>
+                        <tr className="bg-accent/10">
+                          <td colSpan={order.length} className="px-2 py-2">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="text-[11px] px-2 py-1 rounded border border-border hover:bg-accent/20"
+                                onClick={() => setCollapsed((s) => ({ ...s, [g.cid]: !s[g.cid] }))}
+                              >
+                                {isCollapsed ? "+" : "–"}
+                              </button>
+
+                              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full">
+                                {g.cid}
+                              </Badge>
+
+                              <div className="text-[11px] font-medium text-foreground/90">{headerLabel}</div>
+
+                              <Badge variant="outline" className="h-5 px-2 text-[10px] rounded-full ml-auto">
+                                {g.items.length} needs
+                              </Badge>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {!isCollapsed &&
+                          g.items.map((it) => {
+                            const isOpen = !!open[it.need_id];
+                            return (
+                              <React.Fragment key={it.need_id}>
+                                <tr className="hover:bg-accent/10">{order.map((c) => renderCell(c, it))}</tr>
+
+                                {isOpen && (
+                                  <tr className="bg-muted/30 dark:bg-muted/20">
+                                    <td colSpan={order.length} className="px-2 py-2">
+                                      <div className="mx-auto max-w-5xl">
+                                        <div className="mb-3 px-1">
+                                          <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
+                                            Need statement
+                                          </div>
+                                          <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+                                            {it.statement}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                          <InfoCard
+                                            className="w-full sm:w-[280px]"
+                                            title="Why this matters"
+                                            tooltip="The reasoning behind why this need exists."
+                                            text={it.rationale}
+                                            Icon={AlertTriangle}
+                                          />
+
+                                          <InfoCard
+                                            className="w-full sm:w-[280px]"
+                                            title="Why this applies here"
+                                            tooltip="Why this is relevant to the current context."
+                                            text={it.relevance_rationale}
+                                            Icon={Search}
+                                          />
+
+                                          <InfoCard
+                                            className="w-full sm:w-[280px]"
+                                            title="Regulatory intent"
+                                            tooltip="What the regulation is trying to achieve."
+                                            text={it.intent_summary_trace}
+                                            Icon={BookOpen}
+                                          />
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                      </React.Fragment>
+                    );
+                  })
+                ) : (
+                  /* Flat mode */
+                  visibleItems.map((it) => {
+                    const isOpen = !!open[it.need_id];
+                    return (
+                      <React.Fragment key={it.need_id}>
+                        <tr className="hover:bg-accent/10">{order.map((c) => renderCell(c, it))}</tr>
+
+                        {isOpen && (
+                          <tr className="bg-muted/30 dark:bg-muted/20">
+                            <td colSpan={order.length} className="px-2 py-2">
+                              <div className="mx-auto max-w-5xl">
+                                <div className="mb-3 px-1">
+                                  <div className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-wide">
+                                    Need statement
+                                  </div>
+                                  <div className="mt-1 text-[12px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+                                    {it.statement}
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                  <InfoCard
+                                    className="w-full sm:w-[280px]"
+                                    title="Why this matters"
+                                    tooltip="The reasoning behind why this need exists."
+                                    text={it.rationale}
+                                    Icon={AlertTriangle}
+                                  />
+
+                                  <InfoCard
+                                    className="w-full sm:w-[280px]"
+                                    title="Why this applies here"
+                                    tooltip="Why this is relevant to the current context."
+                                    text={it.relevance_rationale}
+                                    Icon={Search}
+                                  />
+
+                                  <InfoCard
+                                    className="w-full sm:w-[280px]"
+                                    title="Regulatory intent"
+                                    tooltip="What the regulation is trying to achieve."
+                                    text={it.intent_summary_trace}
+                                    Icon={BookOpen}
+                                  />
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </SortableContext>
+        </DndContext>
+
+        <div className="px-3 py-2 text-[10px] text-muted-foreground/70 border-t border-border">
+          Tip: use + to expand. Drag “⋮⋮” to reorder columns. Drag the thin right-edge handle to resize.
+          <button
+            className="ml-2 underline underline-offset-2 hover:text-foreground"
+            onClick={() => setWidths({ ...DEFAULT_WIDTHS })}
+            type="button"
+          >
+            reset widths
+          </button>
+        </div>
+      </div>
+
+      {sandboxOpen && sandboxDraft && (
+        <NeedsSandboxPanel
+          open
+          tabId={tabId}
+          draft={sandboxDraft}
+          initialDecisions={decisions}
+          initialEvals={evals}
+          onClose={() => {
+            setSandboxOpen(false);
+            setSandboxDraft(null);
+          }}
+          onApply={onSandboxApply}
+        />
+      )}
     </>
   );
 }
-
-

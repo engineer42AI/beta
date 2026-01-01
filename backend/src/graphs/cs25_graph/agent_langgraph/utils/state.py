@@ -23,3 +23,16 @@ class AgentState(MessagesState):
 
     system_status: Optional[str] = None  # NEW
     needs_trigger: Optional[str] = None
+
+
+# -------------------------------
+# Needs Panel (batch scan) state
+# -------------------------------
+class NeedsPanelScanState(MessagesState):
+    """
+    Minimal state for the needs panel batch scan.
+    The scan node pulls:
+      - the user query from messages[-1]
+      - the needs sandbox draft from Redis using tab_id
+    """
+    tab_id: str

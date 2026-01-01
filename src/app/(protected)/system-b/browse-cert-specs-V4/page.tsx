@@ -36,6 +36,7 @@ import {
 import { NeedsSnapshotCta } from "./NeedsSnapshotCta";
 
 import { registerNeedsHandlers, NEEDS_WF } from "./needs.handlers";
+import { registerNeedsPanelHandlers } from "./needsPanel.handlers";
 
 import { IS_PROD } from "@/lib/env";
 
@@ -508,6 +509,7 @@ export default function BrowseCertSpecV4Page() {
     registerOutlineHandlers();
     registerAgentLangGraphHandlers();
     registerNeedsHandlers();
+    registerNeedsPanelHandlers();
 
     return () => {
       // no-op: handlers are idempotent and guarded
@@ -796,6 +798,7 @@ export default function BrowseCertSpecV4Page() {
                   <>
                     <NeedsTableUI
                       kind="stream"
+                      tabId={boundTabId ?? ""}
                       items={needsState?.items ?? []}
                       frozenAt={currentSnapshotAt}
                       streaming={needsState?.meta.streaming ?? false}
