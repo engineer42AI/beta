@@ -1,3 +1,5 @@
+// src/stores/projects.ts
+
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -32,7 +34,7 @@ type Store = {
   activeProjectId: string | null;
 
   // CRUD
-  add: (p: Omit<Project, "id" | "createdAt" | "updatedAt" | "tdp">) => string; // returns id
+  add: (p: { name: string; description?: string }) => string;
   addFromCaseStudy: (meta: { title: string; description?: string; caseStudyId: string }, tdp: TDP) => string;
   update: (id: string, patch: Partial<Project>) => void;
   remove: (id: string) => void;

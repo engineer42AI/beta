@@ -20,6 +20,8 @@ import {
 // ✅ use the zustand page-config store
 import { usePageConfigStore } from "@/stores/pageConfig-store";
 
+import { orchestrator } from "@/lib/pageOrchestrator";
+
 export type ToolId = "logs" | "ai" | "traces" | "tasks";
 
 export type ConsoleTab = {
@@ -490,16 +492,18 @@ export const useConsoleStore = create<ConsoleState>()(
         if (fromVersion < 3) {
           const aiBindings = s.aiBindings ?? {};
           for (const [tabId, b] of Object.entries(aiBindings)) {
-            const manifest = (b as any).manifest ?? {};
-            aiBindings[tabId] = {
-              ...b,
-              manifest: {
-                tabId: manifest.tabId ?? tabId,
-                route: manifest.route ?? (b as any).route,
-                pageId: manifest.pageId ?? (b as any).pageId,
-                title: manifest.title ?? undefined,
-              },
-            };
+              const obj = (b && typeof b === "object") ? (b as Record<string, any>) : {};
+              const manifest = (obj.manifest && typeof obj.manifest === "object") ? obj.manifest : {};
+
+              aiBindings[tabId] = {
+                ...obj,
+                manifest: {
+                  tabId: manifest.tabId ?? tabId,
+                  route: manifest.route ?? obj.route,
+                  pageId: manifest.pageId ?? obj.pageId,
+                  title: manifest.title ?? undefined,
+                },
+              };
           }
           s.aiBindings = aiBindings;
         }

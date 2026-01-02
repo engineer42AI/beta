@@ -16,11 +16,11 @@ export type NeedsClusters = {
 };
 
 export type NeedStrand =
-  | "PERFORMANCE"
-  | "INTEGRITY"
-  | "INTEGRATION"
-  | "MAINTAINABILITY"
-  | "ASSURANCE";
+  | "FUNCTIONAL_DESIGN_PERFORMANCE"
+  | "MATERIALS"
+  | "MANUFACTURING_METHOD"
+  | "INTEGRATION_ENVIRONMENT"
+  | "OTHER";
 
 export type NeedsStrands = {
   map: Record<

@@ -14,7 +14,7 @@ export type ChatMsg = {
 export type StatusTick = {
   text: string;
   at: number;
-  scope?: "OUTLINE" | "NEEDS";
+  scope?: "OUTLINE" | "NEEDS" | "TOPIC";
 };
 
 /* ---------- progress (persisted) ---------- */
@@ -71,6 +71,7 @@ type ChatState = {
   clear: (route?: string, tabId?: string) => void;
   clearByTabId: (tabId: string) => void;
   clearByRoute: (route: string) => void;
+  clearProgress: (key: string, match?: string) => void;
 };
 
 export const useCS25ChatStore = create<ChatState>()(
@@ -139,6 +140,24 @@ export const useCS25ChatStore = create<ChatState>()(
           const { [key]: _drop2, ...restTicks } = s.statusTicks;
           const { [key]: _drop3, ...restProg } = s.progress;
           return { messages: restMsgs, statusTicks: restTicks, progress: restProg };
+        }),
+
+        clearProgress: (key, match) =>
+            set((s) => {
+              const byRun = { ...(s.progress[key] ?? {}) };
+
+              // no match => clear all progress for this key
+              if (!match) {
+                const { [key]: _drop, ...restProg } = s.progress;
+                return { progress: restProg };
+              }
+
+              // match => remove only runs whose runId contains the match token
+              for (const runId of Object.keys(byRun)) {
+                if (runId.includes(match)) delete byRun[runId];
+              }
+
+              return { progress: { ...s.progress, [key]: byRun } };
         }),
 
       clear: (route, tabId) => {

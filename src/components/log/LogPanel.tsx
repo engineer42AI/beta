@@ -52,10 +52,10 @@ export default function LogPanel() {
   // derived rows
   const filtered = useMemo(() => {
     const byLevel = new Set<LogEntry["level"]>([
-      ...(showDebug ? ["debug"] : []),
-      ...(showInfo ? ["info"] : []),
-      ...(showWarn ? ["warn"] : []),
-      ...(showError ? ["error"] : []),
+      ...(showDebug ? (["debug"] as const) : []),
+      ...(showInfo ? (["info"] as const) : []),
+      ...(showWarn ? (["warn"] as const) : []),
+      ...(showError ? (["error"] as const) : []),
     ]);
 
     const qx = q.trim().toLowerCase();

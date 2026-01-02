@@ -82,7 +82,7 @@ function readinessScore(item: ComplianceItem) {
   const vals = Object.entries(item.status)
     .filter(([k]) => k !== "frozen")
     .map(([, v]) => (v ? 1 : 0));
-  const score = vals.reduce((a, b) => a + b, 0);
+  const score = vals.reduce<number>((a, b) => a + b, 0);
   return { score, total: vals.length };
 }
 

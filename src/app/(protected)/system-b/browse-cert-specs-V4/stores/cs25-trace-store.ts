@@ -10,6 +10,8 @@ export type CS25TraceResult = {
   total_cost?: number;
   run_id?: string;
   at: number;                     // when we stored it (ms)
+  backend_run_id?: string | null;
+  work_run_id?: string | null;
   // keep anything else you find useful (tokens, clause, etc.)
 };
 

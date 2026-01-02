@@ -1,3 +1,5 @@
+// src/app/(protected)/projects/page.tsx
+
 "use client";
 
 import * as React from "react";
@@ -21,13 +23,14 @@ import { Plus, Search, FolderOpen, Pencil, Trash2, ChevronDown } from "lucide-re
 // Zustand store
 import { useProjectsStore, type Project } from "@/stores/projects";
 
+type CreateProjectInput = Omit<Project, "id" | "createdAt" | "updatedAt" | "tdp">;
 
 // -----------------------------------------------------------------------------
 // Create / Edit Dialogs
 // -----------------------------------------------------------------------------
 
 const CreateProjectDialog: React.FC<{
-  onCreate: (p: Omit<Project, "id" | "createdAt" | "updatedAt">) => void;
+  onCreate: (p: CreateProjectInput) => void;
 }> = ({ onCreate }) => {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -145,7 +148,7 @@ export default function Page() {
     })();
   }, []);
 
-  const onCreate = (p: Omit<Project, "id" | "createdAt" | "updatedAt">) => add(p);
+  const onCreate = (p: CreateProjectInput) => add(p);
   const onDelete = (id: string) => { remove(id); toast.message("Project deleted"); };
   const onEditSave = (id: string, patch: Partial<Project>) => { update(id, patch); toast.success("Changes saved"); };
   const onOpen = (p: Project) => {
@@ -174,7 +177,7 @@ export default function Page() {
 
   return (
     <main className="w-full p-6">
-      <div className="mfiltered mx-auto flex flex-col gap-4">
+      <div className="mx-auto flex flex-col gap-4">
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div>

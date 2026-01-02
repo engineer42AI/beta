@@ -142,7 +142,7 @@ export default function BottomConsole() {
 
                 {!isSingleton && (
                   // Pass current pathname so the new AI tab seeds its binding to this page
-                  <Button size="xs" variant="ghost" onClick={() => newTab(activeTool, undefined, pathname)}>
+                  <Button size="sm" variant="ghost" onClick={() => newTab(activeTool, undefined, pathname)}>
                     <Plus className="w-3 h-3 mr-1" /> New {activeTool}
                   </Button>
                 )}

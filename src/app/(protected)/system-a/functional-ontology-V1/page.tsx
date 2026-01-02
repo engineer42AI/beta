@@ -17,8 +17,11 @@ import ReactFlow, {
   useReactFlow,
   Panel,
   NodeToolbar,
+  NodeProps,
+  MarkerType, // ✅ add this
 } from "reactflow";
 import "reactflow/dist/style.css";
+
 
 /* ============================================================================
    Layout + sizing
@@ -115,7 +118,7 @@ function buildGraphFromBundle(bundle: Bundle) {
 const g = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
 
 function layoutWithDagre(
-  nodes: Node[],
+  nodes: Node<OntNodeData>[],
   edges: Edge[],
   dir: "TB" | "LR" = "TB"
 ) {
@@ -173,7 +176,7 @@ type OntNodeData = {
   forceToolbarVisible?: boolean;
 };
 
-function OntNode({ id, data }: { id: string; data: OntNodeData; selected: boolean }) {
+function OntNode({ id, data, selected }: NodeProps<OntNodeData>) {
   return (
     <div
       className="rounded-[var(--radius)] border bg-card text-card-foreground shadow-sm overflow-hidden"
@@ -247,8 +250,8 @@ export default function GraphPage() {
 function FlowCanvas() {
   const [layoutDir, setLayoutDir] = React.useState<"TB" | "LR">("TB");
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<OntNodeData>[]>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<OntNodeData>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   const [showInspector, setShowInspector] = React.useState(true);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -431,7 +434,6 @@ function FlowCanvas() {
           source: parentId,
           target: cid,
           type: "smoothstep",
-          markerEnd: { type: "arrowclosed" },
         }))
         .filter((e) => !haveE.has(e.id));
 
@@ -508,7 +510,6 @@ function FlowCanvas() {
       source: parentId,
       target: newId,
       type: "smoothstep",
-      markerEnd: { type: "arrowclosed" },
     }]);
 
     applyLayout(layoutDir, { nodes: nextNodes, edges: nextEdges });

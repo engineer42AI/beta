@@ -9,8 +9,12 @@ const DOC_PATHS: Record<string, string> = {
   cs25: process.env.CS25_PDF_PATH || "src/app/data/CS-25 Amendment 27 (new).pdf",
 };
 
-export async function GET(req: NextRequest, { params }: { params: { doc: string } }) {
-  const docKey = params.doc?.toLowerCase();
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ doc: string }> }
+) {
+  const { doc } = await params;
+  const docKey = doc.toLowerCase();
   const filePath = DOC_PATHS[docKey];
   if (!filePath || !fs.existsSync(filePath)) {
     return new Response("Not found", { status: 404 });

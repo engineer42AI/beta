@@ -185,7 +185,7 @@ function SectionEditor({
 }) {
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: true, blockquote: true }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] }, codeBlock: {}, blockquote: {} }),
       Underline,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Placeholder.configure({ placeholder: section.title }),
@@ -213,13 +213,24 @@ function SectionEditor({
   const debounced = useDebounce(() => editor && onChange(editor.getJSON()), 250);
 
   useEffect(() => {
-    if (!editor) return;
-    const upd = () => debounced();
-    editor.on("update", upd);
-    return () => editor.off("update", upd);
+      if (!editor) return;
+
+      const upd = () => debounced();
+      editor.on("update", upd);
+
+      return () => {
+        editor.off("update", upd); // ✅ cleanup returns void now
+      };
   }, [editor, debounced]);
 
-  useEffect(() => { if (editor) editor.commands.setContent(section.content, false); }, [section.id, editor]);
+  useEffect(() => {
+    if (!editor) return;
+
+    editor.commands.setContent(section.content, {
+      emitUpdate: false,
+      errorOnInvalidContent: false,
+    });
+  }, [editor, section.content]);
 
   return (
     <section className="tiptap-card">
@@ -323,7 +334,7 @@ function FloatingToolbar({ editor }: { editor: Editor | null }) {
     if (!editor) return;
     const sel = () => closeAll();
     editor.on("selectionUpdate", sel);
-    return () => editor.off("selectionUpdate", sel);
+    return () => {editor.off("selectionUpdate", sel)};
   }, [editor, closeAll]);
 
   if (!editor || !focused) return null;
@@ -441,7 +452,7 @@ function tiptapToMarkdown(node: any, parentType?: string, index?: number): strin
 
   // Children
   const children = Array.isArray(node.content)
-    ? node.content.map((child, i) => tiptapToMarkdown(child, type, i)).join("")
+    ? (node.content as any[]).map((child: any, i: number) => tiptapToMarkdown(child, type, i)).join("")
     : "";
 
   switch (type) {

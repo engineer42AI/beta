@@ -2,7 +2,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import AppShell from "@/components/app-shell";
-import OrchLoggerInstaller from "./OrchLoggerInstaller";
 
 export default async function ProtectedLayout({
   children,

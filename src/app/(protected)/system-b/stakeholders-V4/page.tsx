@@ -16,6 +16,8 @@ import {
   Edge,
   Node,
   Panel,
+  NodeProps, // ✅ add this
+  Connection,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,7 @@ import { Users, Settings2, ShieldCheck, FileText, Map, Plus, Download, Trash2, C
 /* =========================================================
    Types (ARP4754B mapped, title-first – no personal names)
 ========================================================= */
+
 
 type StakeKind =
   | "Customer" | "Operator" | "Flight Crew" | "Cabin Crew" | "Maintenance"
@@ -62,6 +65,13 @@ type ValidationInfo = {
   reviews: { SRR?: boolean; PDR?: boolean; CDR?: boolean };
   evidence?: { label: string; url?: string }[];
 };
+
+type SystemNodeData = { label: string };
+type StakeNodeData  = { label: string; kind: string };
+
+type RFNodeData = SystemNodeData | StakeNodeData;
+type RFNode = Node<RFNodeData, "system" | "stake">;
+type RFEdge = Edge;
 
 type Stakeholder = {
   id: string;
@@ -142,7 +152,7 @@ function toJSONL(rows: Stakeholder[]) {
    React Flow: custom nodes
 ========================================================= */
 
-function SystemNode({ data }: { data: { label: string } }) {
+function SystemNode({ data }: NodeProps<SystemNodeData>) {
   return (
     <div className="rounded-2xl border bg-card text-card-foreground shadow px-4 py-3 min-w-[160px]">
       <div className="text-sm font-semibold flex items-center gap-2"><Settings2 className="h-4 w-4"/> {data.label}</div>
@@ -155,7 +165,7 @@ function SystemNode({ data }: { data: { label: string } }) {
   );
 }
 
-function StakeToken({ data }: { data: { label: string; kind: string } }) {
+function StakeToken({ data }: NodeProps<StakeNodeData>) {
   return (
     <motion.div layout whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}
       className="rounded-full border bg-background shadow-sm px-3 py-1 text-xs flex items-center gap-2">
@@ -228,26 +238,31 @@ export default function StakeholdersCrewBuilderPage() {
   }
 
   /* ---------- Flow Map ---------- */
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>([
-    { id: "SYS-A", type: "system", position: { x: 160, y: 180 }, data: { label: "System A – Product" } },
-    { id: "SYS-B", type: "system", position: { x: 520, y: 100 }, data: { label: "System B – Environment" } },
-    { id: "SYS-C", type: "system", position: { x: 520, y: 300 }, data: { label: "System C – Enterprise" } },
-  ]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+  const initialNodes: RFNode[] = [
+      { id: "SYS-A", type: "system", position: { x: 160, y: 180 }, data: { label: "System A – Product" } },
+      { id: "SYS-B", type: "system", position: { x: 520, y: 100 }, data: { label: "System B – Environment" } },
+      { id: "SYS-C", type: "system", position: { x: 520, y: 300 }, data: { label: "System C – Enterprise" } },
+  ];
 
   function pinToMap(s: Stakeholder) {
     const exists = nodes.find((n) => n.id === s.id);
     if (exists) return setSelectedId(s.id);
-    setNodes((nds) => nds.concat({
-      id: s.id,
-      type: "stake",
-      position: { x: 820, y: 140 + Math.random() * 220 },
-      data: { label: s.title || "Stakeholder", kind: s.kind },
-    }));
+    setNodes((nds) =>
+      nds.concat({
+        id: s.id,
+        type: "stake",
+        position: { x: 820, y: 140 + Math.random() * 220 },
+        data: { label: s.title || "Stakeholder", kind: s.kind },
+      })
+    );
     setSelectedId(s.id);
   }
 
-  function onConnect(params: any) {
+  const [nodes, setNodes, onNodesChange] = useNodesState<RFNodeData>(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
+
+  function onConnect(params: Connection) {
+    if (!params.source || !params.target) return;
     setEdges((eds) => addEdge({ ...params, animated: true, label: "Interface" }, eds));
     // record interface into stakeholder
     const stakeId = ["SYS-A","SYS-B","SYS-C"].includes(params.source) ? params.target : params.source;

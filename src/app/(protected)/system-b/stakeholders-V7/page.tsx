@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useState, useMemo } from "react";
-import create from "zustand";
+import { create } from "zustand";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   DndContext,

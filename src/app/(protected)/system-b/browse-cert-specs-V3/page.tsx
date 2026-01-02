@@ -17,6 +17,7 @@ type OutlineNode = {
   type: 'Subpart' | 'Heading' | 'Section';
   uuid: string;
   label?: string;
+  code?: string;
   number?: string;
   title?: string;
   paragraph_id?: string;

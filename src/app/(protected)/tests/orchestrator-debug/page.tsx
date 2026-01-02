@@ -207,12 +207,12 @@ function groupSimilarRows(rows: WireEntry[], minGroupSize = 4): GroupedItem[] {
           from: ref.from,
           to: ref.to,
           channel: ref.channel,
-          label: ref.label,
+          label: ref.label ?? "",
         },
         entries: [...buffer],
       });
     } else {
-      result.push(...buffer.map((e) => ({ type: "single", entry: e })));
+      result.push(...buffer.map((e) => ({ type: "single" as const, entry: e })));
     }
     buffer = [];
   };
@@ -233,12 +233,31 @@ function groupSimilarRows(rows: WireEntry[], minGroupSize = 4): GroupedItem[] {
   return result;
 }
 
-export default function OrchestratorWire() {
-  const [wire, setWire] = useState<WireEntry[]>(orchestrator.getWire?.() ?? []);
-  const [state, setState] = useState<OrchestratorPublicState | null>(orchestrator.getState?.() ?? null);
+type OrchestratorDebugApi = {
+  getWire?: () => WireEntry[];
+  subscribeWire?: (cb: (wire: WireEntry[]) => void) => void | (() => void);
 
-  useEffect(() => orchestrator.subscribeWire?.(setWire), []);
-  useEffect(() => orchestrator.subscribe?.((s: any) => setState(s)), []);
+  getState?: () => OrchestratorPublicState | null;
+  subscribe?: (cb: (s: OrchestratorPublicState | null) => void) => void | (() => void);
+};
+
+// widen just in this page (no library changes needed)
+const orch = orchestrator as unknown as OrchestratorDebugApi;
+
+
+export default function OrchestratorWire() {
+  const [wire, setWire] = useState<WireEntry[]>(orch.getWire?.() ?? []);
+  const [state, setState] = useState<OrchestratorPublicState | null>(orch.getState?.() ?? null);
+
+  useEffect(() => {
+    const unsub = orch.subscribeWire?.(setWire);
+    return typeof unsub === "function" ? unsub : undefined;
+  }, []);
+
+  useEffect(() => {
+    const unsub = orch.subscribe?.((s) => setState(s));
+    return typeof unsub === "function" ? unsub : undefined;
+  }, []);
 
   const groups = useMemo(() => groupWire(wire), [wire]);
 

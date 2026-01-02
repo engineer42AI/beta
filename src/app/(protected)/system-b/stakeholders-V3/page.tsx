@@ -8,6 +8,8 @@ import {
 import "reactflow/dist/style.css";
 import { Button } from "@/components/ui/button";
 
+
+
 /* =========================================================
    Types (ARP4754B mapped)
 ========================================================= */
@@ -145,11 +147,12 @@ export default function StakeholdersV3Page() {
   }
 
   /* ---------- Context Map (center) ---------- */
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>([
-    { id: "SYSTEM", type: "system", position: { x: 600, y: 260 }, data: {} },
+  const [nodes, setNodes, onNodesChange] = useNodesState<any>([
+      { id: "SYSTEM", type: "system", position: { x: 600, y: 260 }, data: {} },
   ]);
 
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+  type CtxEdgeData = {}; // or your edge data shape
+  const [edges, setEdges, onEdgesChange] = useEdgesState<CtxEdgeData>([]);
 
   // add stake token to canvas when user clicks "Pin to map"
   function pinToMap(s: Stakeholder) {

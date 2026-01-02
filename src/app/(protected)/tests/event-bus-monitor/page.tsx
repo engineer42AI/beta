@@ -324,10 +324,10 @@ function EventRow({ row }: { row: Row }) {
             <Button size="sm" variant="outline">Inspect</Button>
           </CollapsibleTrigger>
           <div className="flex items-center gap-2">
-            <Button size="xs" variant="outline" onClick={() => navigator.clipboard.writeText(exact).catch(() => {})}>
+            <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(exact).catch(() => {})}>
               Copy JSON (exact)
             </Button>
-            <Button size="xs" variant="outline" onClick={() => navigator.clipboard.writeText(stable).catch(() => {})}>
+            <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(stable).catch(() => {})}>
               Copy JSON (stable)
             </Button>
           </div>

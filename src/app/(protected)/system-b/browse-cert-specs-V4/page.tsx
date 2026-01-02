@@ -188,7 +188,7 @@ export default function BrowseCertSpecV4Page() {
   });
 
   const storageTabKey = boundTabId ?? undefined;
-  const activeKey = storageTabKey ? `${route}::${storageTabKey}` : null;
+  const activeKey = storageTabKey ? `${route}::${storageTabKey}` : undefined;
   const displayScopedKey =
     boundTabId && pageId ? `${boundTabId}::${pageId}` : undefined;
   const isBound = Boolean(boundTabId && pageId);
@@ -626,7 +626,7 @@ export default function BrowseCertSpecV4Page() {
         }
       return same ? prev : next;
     });
-    setHydratedKey(activeKey);
+    setHydratedKey(activeKey ?? null);
     // eslint-disable-next-line no-console
     console.debug("[V4] hydrated selections", {
       activeKey,
@@ -805,9 +805,7 @@ export default function BrowseCertSpecV4Page() {
                       done={needsState?.meta.done}
                       total={needsState?.meta.total}
                       clusters={needsState?.clusters}
-                      clustersReady={needsState?.meta.clustersReady}
                       strands={needsState?.strands}                 // ✅ new
-                      strandsReady={needsState?.meta.strandsReady} // ✅ new
                     />
 
                     <div className="mt-3 flex flex-col items-center gap-2">
@@ -846,7 +844,7 @@ export default function BrowseCertSpecV4Page() {
               boundTabId={boundTabId ?? null}
               pageId={pageId}
               displayScopedKey={displayScopedKey}
-              activeKey={activeKey}
+              activeKey={activeKey ?? ""}
               binding={binding}
               hydratedKey={hydratedKey}
               storageTabKey={storageTabKey}

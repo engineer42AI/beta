@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { decodeJwt, getUserInfo } from "@/lib/cognito";
 
 export async function GET() {
-  const c = cookies();
+  const c = await cookies();
   const at = c.get("e42_at")?.value;
   const it = c.get("e42_it")?.value;
   if (!at || !it) return NextResponse.json({ authenticated: false }, { status: 401 });

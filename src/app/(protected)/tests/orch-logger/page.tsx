@@ -3,7 +3,7 @@ import LoggerClient from "@/app/(protected)/system-b/browse-cert-specs-V4/logger
 export default function OrchLoggerPage() {
   return (
     <div style={{ padding: 16 }}>
-      <LoggerClient />
+      <LoggerClient tabId={null} />
     </div>
   );
 }

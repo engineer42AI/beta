@@ -6,8 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "postinstall": "mkdir -p public/pdfjs && cp -r node_modules/pdfjs-dist/{build,web,cmaps} public/pdfjs/"
+    "lint": "next lint"
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.5",

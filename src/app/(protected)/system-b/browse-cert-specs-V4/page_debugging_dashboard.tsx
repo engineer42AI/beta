@@ -117,7 +117,8 @@ export default function PageDebuggingDashboard(props: {
 
           <div className="ml-auto flex items-center gap-2">
             <Button
-              size="xs"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
               variant="outline"
               onClick={() => {
                 try { navigator.clipboard.writeText(JSON.stringify(config ?? {}, null, 2)); } catch {}
@@ -126,7 +127,8 @@ export default function PageDebuggingDashboard(props: {
               Copy JSON
             </Button>
             <Button
-              size="xs"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
               variant="outline"
               onClick={() => {
                 try {
@@ -177,11 +179,12 @@ export default function PageDebuggingDashboard(props: {
             <code>{attempt}</code>
 
             <div className="ml-3 flex items-center gap-2">
-              <Button size="xs" variant="outline" onClick={loadOutline} disabled={loading}>
+              <Button size="sm" className="h-7 px-2 text-[11px]" variant="outline" onClick={loadOutline} disabled={loading}>
                 {loading ? "Loading…" : "Retry"}
               </Button>
               <Button
-                size="xs"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
                 variant="outline"
                 onClick={() => {
                   try { navigator.clipboard.writeText(JSON.stringify(rawPayload ?? {}, null, 2)); } catch {}
@@ -191,7 +194,8 @@ export default function PageDebuggingDashboard(props: {
                 Copy JSON
               </Button>
               <Button
-                size="xs"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
                 variant="outline"
                 onClick={() => {
                   try {

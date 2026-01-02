@@ -1,0 +1,21 @@
+# Big / build artifacts
+node_modules
+.next
+
+# Python venvs (yours may be in different places)
+backend/.venv
+My_environment
+__pycache__/
+*.pyc
+
+# Git + IDE
+.git
+.idea
+.DS_Store
+
+# Env files: ignore all, then allow the prod ones you want in the build context
+.env
+.env.*
+!.env.example
+!deploy/frontend.prod.env
+!deploy/backend.prod.env

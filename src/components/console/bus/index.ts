@@ -26,5 +26,5 @@ export const useAiConsoleChannel = (opts?: { maxFeed?: number }) => {
   };
 };
 
-export const useTracesChannel = () => useBusChannel("traces"); // when you add traces bindings
-export const useLogsChannel = () => useBusChannel("logs");     // when you add logs bindings
+export const useTracesChannel = () => usePageBusChannel("traces"); // when you add traces bindings
+export const useLogsChannel = () => usePageBusChannel("logs");     // when you add logs bindings

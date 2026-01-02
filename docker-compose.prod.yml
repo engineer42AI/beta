@@ -1,48 +1,41 @@
 # docker-compose.prod.yml
-version: "3.9"
 
 services:
   frontend:
     build:
       context: .
       dockerfile: ./Dockerfile.frontend
-    container_name: e42-frontend
-    env_file: ./deploy/frontend.prod.env
-    command: npm run start
+    args:
+      NEXT_PUBLIC_APP_ENV: ${NEXT_PUBLIC_APP_ENV}
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+    env_file:
+      - ./deploy/frontend.prod.env
     ports:
-      - "80:3000"          # make your app accessible on port 80
+      - "3000:3000"
     depends_on:
       - backend
     networks:
       - appnet
-    restart: unless-stopped
 
   backend:
     build:
       context: ./backend
-      dockerfile: ./src/Dockerfile.backend
-    container_name: e42-backend
-    env_file: ./deploy/backend.prod.env
-    command: sh -c "uvicorn src.app.main:app --host 0.0.0.0 --port 8000"
-    environment:
-      REDIS_URL: redis://redis:6379/0
-    expose:
-      - "8000"             # internal only
+      dockerfile: ./Dockerfile.backend
+    env_file:
+      - ./deploy/backend.prod.env
+    ports:
+      - "8000:8000"
     depends_on:
       - redis
     networks:
       - appnet
-    restart: unless-stopped
 
   redis:
-    image: redis:7.4
-    container_name: e42-redis
-    command: ["redis-server", "--appendonly", "yes"]
+    image: redis/redis-stack:latest
     volumes:
       - redis_data:/data
     networks:
       - appnet
-    restart: unless-stopped
 
 networks:
   appnet:

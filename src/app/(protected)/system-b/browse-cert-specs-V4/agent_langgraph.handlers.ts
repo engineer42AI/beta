@@ -408,8 +408,3 @@ export function registerAgentLangGraphHandlers() {
   // Tiny breadcrumb in your debug panel
   orchestrator.sendToConsole("agent.debug", { payload: { msg: "Agent handlers (re)registered" } }, "Agent handlers ready");
 }
-
-/* Dev rewire helper */
-if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
-  window.e42AgentRewire = () => registerAgentLangGraphHandlers();
-}

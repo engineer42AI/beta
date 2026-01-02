@@ -24,7 +24,7 @@ export async function exchangeCodeForTokens(code: string) {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      "Authorization": `Basic ${auth}`,
+      Authorization: `Basic ${auth}`,
     },
     body,
     cache: "no-store",
@@ -32,23 +32,24 @@ export async function exchangeCodeForTokens(code: string) {
 
   if (!res.ok) {
     const text = await res.text();
-    // ⬇️ This will show the precise error in your server logs
     console.error("Cognito token exchange failed:", res.status, text);
     throw new Error(`Token exchange failed ${res.status}`);
   }
 
   return res.json() as Promise<{
-    access_token: string; id_token: string; refresh_token?: string; expires_in: number;
+    access_token: string;
+    id_token: string;
+    refresh_token?: string;
+    expires_in: number;
   }>;
 }
-
 
 export async function refreshTokens(refreshToken: string) {
   const res = await fetch(`${domain}/oauth2/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      "Authorization": `Basic ${b64(`${clientId}:${clientSecret}`)}`
+      Authorization: `Basic ${b64(`${clientId}:${clientSecret}`)}`,
     },
     body: new URLSearchParams({
       grant_type: "refresh_token",
@@ -57,13 +58,22 @@ export async function refreshTokens(refreshToken: string) {
     }),
     cache: "no-store",
   });
+
   if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
-  return res.json();
+  return res.json() as Promise<{
+    access_token: string;
+    id_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  }>;
 }
 
 export function decodeJwt<T = any>(jwt: string): T {
   const [, payload] = jwt.split(".");
-  const json = Buffer.from(payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, "="), "base64").toString("utf8");
+  const json = Buffer.from(
+    payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, "="),
+    "base64"
+  ).toString("utf8");
   return JSON.parse(json);
 }
 
@@ -77,19 +87,34 @@ export async function getUserInfo(accessToken: string) {
 }
 
 // cookie helpers
-const cookieOpts = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/" };
+const cookieOpts = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production", // avoids local dev pain
+  sameSite: "lax" as const,
+  path: "/",
+};
 
-export function setAuthCookies(tokens: {
-  access_token: string; id_token: string; refresh_token?: string; expires_in: number;
+export async function setAuthCookies(tokens: {
+  access_token: string;
+  id_token: string;
+  refresh_token?: string;
+  expires_in: number;
 }) {
-  const c = cookies();
+  const c = await cookies(); // ✅ await in Next 15  [oai_citation:1‡Next.js](https://nextjs.org/docs/app/api-reference/functions/cookies?utm_source=chatgpt.com)
   const exp = new Date(Date.now() + tokens.expires_in * 1000);
+
   c.set("e42_at", tokens.access_token, { ...cookieOpts, expires: exp });
-  c.set("e42_it", tokens.id_token,    { ...cookieOpts, expires: exp });
-  if (tokens.refresh_token) c.set("e42_rt", tokens.refresh_token, { ...cookieOpts, expires: new Date(Date.now() + 30*24*3600*1000) });
+  c.set("e42_it", tokens.id_token, { ...cookieOpts, expires: exp });
+
+  if (tokens.refresh_token) {
+    c.set("e42_rt", tokens.refresh_token, {
+      ...cookieOpts,
+      expires: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+    });
+  }
 }
 
-export function clearAuthCookies() {
-  const c = cookies();
-  ["e42_at","e42_it","e42_rt"].forEach(name => c.delete(name));
+export async function clearAuthCookies() {
+  const c = await cookies(); // ✅ await in Next 15  [oai_citation:2‡Next.js](https://nextjs.org/docs/app/api-reference/functions/cookies?utm_source=chatgpt.com)
+  ["e42_at", "e42_it", "e42_rt"].forEach((name) => c.delete(name));
 }

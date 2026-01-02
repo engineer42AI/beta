@@ -264,4 +264,4 @@ export class PageOrchestrator {
 }
 
 export const orchestrator = new PageOrchestrator();
-export type { WireEntry };
+// export type { WireEntry };
