@@ -1,3 +1,5 @@
+# .github/workflows/deploy.yml
+
 name: Deploy Beta App
 
 on:
@@ -18,10 +20,12 @@ jobs:
           [ -n "${{ secrets.SSH_KEY_B64 }}" ] || { echo "::error::SSH_KEY_B64 missing"; exit 1; }
 
           # App config
+          [ -n "${{ secrets.NEXT_PUBLIC_API_BASE }}" ] || { echo "::error::NEXT_PUBLIC_API_BASE missing"; exit 1; }
           [ -n "${{ secrets.APP_BASE_URL }}" ] || { echo "::error::APP_BASE_URL missing"; exit 1; }
           [ -n "${{ secrets.COGNITO_DOMAIN }}" ] || { echo "::error::COGNITO_DOMAIN missing"; exit 1; }
           [ -n "${{ secrets.COGNITO_CLIENT_ID }}" ] || { echo "::error::COGNITO_CLIENT_ID missing"; exit 1; }
           [ -n "${{ secrets.COGNITO_CLIENT_SECRET }}" ] || { echo "::error::COGNITO_CLIENT_SECRET missing"; exit 1; }
+          [ -n "${{ secrets.COGNITO_REDIRECT_URI }}" ] || { echo "::error::COGNITO_REDIRECT_URI missing"; exit 1; }
           [ -n "${{ secrets.OPENAI_API_KEY }}" ] || { echo "::error::OPENAI_API_KEY missing"; exit 1; }
 
       - name: Prepare SSH key (decode from base64)
@@ -32,14 +36,29 @@ jobs:
 
       - name: Smoke test SSH connection
         run: |
-          ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          ssh -i id_ci.pem \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             'whoami && hostname && echo "✅ SSH OK"'
 
       - name: Deploy over SSH (Docker Compose)
+        env:
+          # IMPORTANT: these become *environment variables* for the runner,
+          # and will be available inside the remote script as $NEXT_PUBLIC_API_BASE, etc.
+          NEXT_PUBLIC_API_BASE: ${{ secrets.NEXT_PUBLIC_API_BASE }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          COGNITO_DOMAIN: ${{ secrets.COGNITO_DOMAIN }}
+          COGNITO_CLIENT_ID: ${{ secrets.COGNITO_CLIENT_ID }}
+          COGNITO_CLIENT_SECRET: ${{ secrets.COGNITO_CLIENT_SECRET }}
+          COGNITO_REDIRECT_URI: ${{ secrets.COGNITO_REDIRECT_URI }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          ssh -i id_ci.pem -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'bash -se' <<'REMOTE'
+          ssh -i id_ci.pem \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            'bash -se' <<'REMOTE'
           set -euxo pipefail
 
           cd /home/ubuntu/apps/beta
@@ -48,7 +67,10 @@ jobs:
           git fetch origin
           git checkout deploy
           git reset --hard origin/deploy
-          git clean -ffd || true
+
+          # IMPORTANT: remove ignored files too (like old .env.local)
+          git clean -ffdx || true
+          rm -f .env.local .env.development .env.production || true
 
           echo "== Stop old non-docker service if it exists =="
           sudo systemctl stop beta-next || true
@@ -57,28 +79,39 @@ jobs:
           echo "== Writing env files (NOT committed to repo) =="
           mkdir -p deploy
 
+          # These env vars are injected into this SSH session by the runner.
+          # They are NOT written in the repo; they exist only on the server filesystem.
           cat > deploy/frontend.prod.env <<EOF
           NEXT_PUBLIC_APP_ENV=production
-          NEXT_PUBLIC_API_BASE=${{ secrets.NEXT_PUBLIC_API_BASE }}
+          NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
           EOF
 
           cat > deploy/backend.prod.env <<EOF
-          REDIS_URL=redis://redis:6379/0
-          APP_BASE_URL=${{ secrets.APP_BASE_URL }}
-          COGNITO_DOMAIN=${{ secrets.COGNITO_DOMAIN }}
-          COGNITO_CLIENT_ID=${{ secrets.COGNITO_CLIENT_ID }}
-          COGNITO_CLIENT_SECRET=${{ secrets.COGNITO_CLIENT_SECRET }}
-          COGNITO_REDIRECT_URI=${{ secrets.COGNITO_REDIRECT_URI }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          REDIS_URL=${REDIS_URL}
+          APP_BASE_URL=${APP_BASE_URL}
+          COGNITO_DOMAIN=${COGNITO_DOMAIN}
+          COGNITO_CLIENT_ID=${COGNITO_CLIENT_ID}
+          COGNITO_CLIENT_SECRET=${COGNITO_CLIENT_SECRET}
+          COGNITO_REDIRECT_URI=${COGNITO_REDIRECT_URI}
+          OPENAI_API_KEY=${OPENAI_API_KEY}
           EOF
 
           echo "== Export build args for Next build =="
           export NEXT_PUBLIC_APP_ENV=production
-          export NEXT_PUBLIC_API_BASE="${{ secrets.NEXT_PUBLIC_API_BASE }}"
+          export NEXT_PUBLIC_API_BASE="${NEXT_PUBLIC_API_BASE}"
+
+          # Keep docker build output alive + verbose
+          export BUILDKIT_PROGRESS=plain
+
+          # Reduce chance Next build dies on low RAM
+          export NODE_OPTIONS="--max-old-space-size=768"
 
           echo "== Docker compose build+up =="
           docker compose -f docker-compose.prod.yml down || true
-          docker compose -f docker-compose.prod.yml build
+
+          # Keep logs flowing (helps prevent SSH disconnects)
+          docker compose -f docker-compose.prod.yml build --progress=plain
+
           docker compose -f docker-compose.prod.yml up -d
 
           echo "== Reload nginx =="
@@ -87,4 +120,7 @@ jobs:
 
           echo "== Status =="
           docker compose -f docker-compose.prod.yml ps
+
+          echo "== Recent logs (useful if something is wrong) =="
+          docker compose -f docker-compose.prod.yml logs --tail=120 || true
           REMOTE

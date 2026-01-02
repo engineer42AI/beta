@@ -7,18 +7,34 @@ RUN npm ci
 
 FROM node:20-alpine AS builder
 WORKDIR /app
+
+# ✅ accept build-time vars from docker compose build.args
+ARG NEXT_PUBLIC_APP_ENV
+ARG NEXT_PUBLIC_API_BASE
+
+# ✅ make them available to Next at build time
+ENV NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
+ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ENV NEXT_TELEMETRY_DISABLED=1
+
+# (optional but helpful on small EC2)
+ENV NODE_OPTIONS="--max-old-space-size=768"
+
 RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY package*.json ./
 RUN npm ci --omit=dev
+
 EXPOSE 3000
 CMD ["npm", "run", "start"]

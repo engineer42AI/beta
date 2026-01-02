@@ -10,10 +10,14 @@ services:
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
     env_file:
       - ./deploy/frontend.prod.env
+    environment:
+      - NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
+      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
+    restart: unless-stopped
     networks:
       - appnet
 
@@ -24,16 +28,18 @@ services:
     env_file:
       - ./deploy/backend.prod.env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       - redis
+    restart: unless-stopped
     networks:
       - appnet
 
   redis:
-    image: redis/redis-stack:latest
+    image: redis/redis-stack:7.4.0-v3
     volumes:
       - redis_data:/data
+    restart: unless-stopped
     networks:
       - appnet
 
