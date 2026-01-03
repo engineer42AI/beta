@@ -6,13 +6,13 @@ services:
       context: .
       dockerfile: ./Dockerfile.frontend
       args:
-        NEXT_PUBLIC_APP_ENV: ${NEXT_PUBLIC_APP_ENV}
-        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+        NEXT_PUBLIC_APP_ENV: "production"
+        NEXT_PUBLIC_API_BASE: "https://beta.engineer42.ai"
     env_file:
       - ./deploy/frontend.prod.env
     environment:
-      - NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
-      - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
+      - NEXT_PUBLIC_APP_ENV=production
+      - NEXT_PUBLIC_API_BASE=https://beta.engineer42.ai
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
