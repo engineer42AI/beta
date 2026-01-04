@@ -77,6 +77,7 @@ async def get_outline_details(payload: OutlineDetailIn):
         raise HTTPException(status_code=500, detail="GraphOps missing required helpers (get_node_type/get_node_meta)")
 
     ntype = ops.get_node_type(payload.uuid)
+    # print(f"[outline.details] uuid={payload.uuid} ntype={ntype}")
 
     # ---- Section branch -------------------------------------------------
     if ntype == "Section":
