@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.6
 # Dockerfile.frontend
 
 FROM node:20-alpine AS deps
@@ -8,23 +9,38 @@ RUN npm ci
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# ✅ accept build-time vars from docker compose build.args
+# --- Next public build-time vars ---
 ARG NEXT_PUBLIC_APP_ENV
 ARG NEXT_PUBLIC_API_BASE
-
-# ✅ make them available to Next at build time
 ENV NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
 ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
-
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# --- Sentry build-time vars (not secret) ---
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT
+ARG SENTRY_RELEASE
+ENV SENTRY_ORG=${SENTRY_ORG}
+ENV SENTRY_PROJECT=${SENTRY_PROJECT}
+ENV SENTRY_RELEASE=${SENTRY_RELEASE}
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# (optional but helpful on small EC2)
+# helpful on small EC2
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 
-RUN npm run build
+# STRICT (fail build if token missing):
+RUN --mount=type=secret,id=sentry_auth_token \
+    export SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token)" && \
+    npm run build
+
+# OPTIONAL (skip upload if token missing):
+# RUN --mount=type=secret,id=sentry_auth_token \
+#     if [ -s /run/secrets/sentry_auth_token ]; then \
+#       export SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token)"; \
+#     fi; \
+#     npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
