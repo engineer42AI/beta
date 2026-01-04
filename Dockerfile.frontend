@@ -22,7 +22,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # (optional but helpful on small EC2)
-ENV NODE_OPTIONS="--max-old-space-size=768"
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 RUN npm run build
 

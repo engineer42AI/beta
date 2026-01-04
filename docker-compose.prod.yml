@@ -8,11 +8,20 @@ services:
       args:
         NEXT_PUBLIC_APP_ENV: "production"
         NEXT_PUBLIC_API_BASE: "https://beta.engineer42.ai"
+
+        # --- Sentry sourcemap upload during build ---
+        SENTRY_AUTH_TOKEN: ${SENTRY_AUTH_TOKEN}
+        SENTRY_ORG: ${SENTRY_ORG}
+        SENTRY_PROJECT: ${SENTRY_PROJECT}
+        SENTRY_RELEASE: ${SENTRY_RELEASE}
     env_file:
       - ./deploy/frontend.prod.env
     environment:
       - NEXT_PUBLIC_APP_ENV=production
       - NEXT_PUBLIC_API_BASE=https://beta.engineer42.ai
+      # --- Sentry tags ---
+      - SENTRY_ENVIRONMENT=production
+      - SENTRY_RELEASE=${SENTRY_RELEASE}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
