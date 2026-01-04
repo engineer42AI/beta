@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
 const isProd = process.env.NODE_ENV === "production";
 const cookieOpts = { httpOnly: true, secure: isProd, sameSite: "lax" as const, path: "/" };
 
-function getPublicOrigin(req: Request) {
-  const h = headers();
+async function getPublicOrigin(req: Request) {
+  const h = await headers(); // <-- await
   const proto = h.get("x-forwarded-proto") || "http";
   const host =
     h.get("x-forwarded-host") ||
@@ -22,9 +22,8 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
 
-  const origin = getPublicOrigin(req);
+  const origin = await getPublicOrigin(req);
 
-  // Sanitize `state` (next URL): allow only same-site paths
   const rawNext = url.searchParams.get("state") || "/overview";
   const nextPath = rawNext.startsWith("/") ? rawNext : "/overview";
   const nextAbs = new URL(nextPath, origin);
