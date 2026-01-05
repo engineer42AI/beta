@@ -66,7 +66,7 @@ const NAV_ITEMS: NavItem[] = [
       { label: "Browse cert spec V2", href: "/system-b/browse-cert-specs-V2", icon: Users, devOnly: true },
       { label: "Browse cert spec V3", href: "/system-b/browse-cert-specs-V3", icon: Users, devOnly: true },
       { label: "CS25 tool", href: "/system-b/browse-cert-specs-V4", icon: FileCheck },
-      { label: "CS25 tool V2", href: "/system-b/certification-basis-V1", icon: FileCheck },
+      { label: "CS25 tool V2", href: "/system-b/certification-basis-V1", icon: FileCheck, devOnly: true},
       { label: "Functional Ontology V1", href: "/system-a/functional-ontology-V1", icon: Users, devOnly: true },
       { label: "Functional Ontology V2", href: "/system-a/functional-ontology-V2", icon: Users, devOnly: true },
       { label: "Functional Ontology V3", href: "/system-a/functional-ontology-V3", icon: Users, devOnly: true },

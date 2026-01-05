@@ -1,12 +1,40 @@
 # backend/src/app/routers/agents.py
 import importlib, json, sys
 from typing import Any, AsyncGenerator, Dict, Optional, Tuple, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from fastapi.encoders import jsonable_encoder
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+# Module-level cache (server-side)
+_OUTLINE_CACHE: dict[tuple[str, str], bytes] = {}
+# If outline never changes unless you rebuild, just bump this manually when you regenerate
+OUTLINE_VERSION = "cs25-outline-v1"   # fallback only
+
+def _get_outline_version(mod, fallback: str) -> str:
+    """
+    Prefer a dynamic corpus version exposed by the agent module.
+    Fallback to the manual OUTLINE_VERSION if not available.
+    """
+    version_fn = getattr(mod, "get_corpus_version", None)
+    if callable(version_fn):
+        try:
+            v = version_fn()
+            if v:
+                return str(v)
+        except Exception:
+            pass
+    return fallback
+
+
+def _compact_json_bytes(data) -> bytes:
+    return json.dumps(
+        jsonable_encoder(data),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 # ---------- request payload (matches your real call) ----------
 class CS25Payload(BaseModel):
@@ -80,14 +108,38 @@ async def stream_agent(name: str, payload: CS25Payload):
     return StreamingResponse(gen(), media_type="application/json")
 
 @router.get("/{name}/outline")
-async def agent_outline(name: str):
+async def agent_outline(name: str, request: Request):
     mod = load_agent_module(name)
     fn = getattr(mod, "get_outline", None)
     if not callable(fn):
         raise HTTPException(status_code=404, detail=f"Agent '{name}' missing get_outline()")
-    try:
-        data = await fn()  # should return {"outline": ..., "indices": ...}
-        return JSONResponse(content=jsonable_encoder(data), status_code=200)
-    except Exception as e:
-        # Return a JSON error, not HTML
-        raise HTTPException(status_code=500, detail=f"outline failed: {e}")
+
+    # ✅ dynamic version (changes when you rebuild corpus)
+    version = _get_outline_version(mod, OUTLINE_VERSION)
+
+    # ✅ ETag should include name + version
+    safe_version = version.replace("sha256:", "sha256-").replace(":", "-")
+    etag = f'"{name}-{safe_version}"'
+
+    # If client already has it, short-circuit
+    if request.headers.get("if-none-match") == etag:
+        resp = Response(status_code=304)
+        resp.headers["ETag"] = etag
+        # ✅ don’t use immutable; allow periodic revalidation
+        resp.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+        resp.headers["Vary"] = "Accept-Encoding"
+        return resp
+
+    # ✅ server-side cached bytes keyed by (name, version)
+    cache_key = (name, version)
+    body = _OUTLINE_CACHE.get(cache_key)
+    if body is None:
+        data = await fn()
+        body = _compact_json_bytes(data)
+        _OUTLINE_CACHE[cache_key] = body
+
+    resp = Response(content=body, media_type="application/json")
+    resp.headers["ETag"] = etag
+    resp.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+    resp.headers["Vary"] = "Accept-Encoding"
+    return resp

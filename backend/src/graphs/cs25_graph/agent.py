@@ -367,11 +367,17 @@ _RUNTIME_CACHE = None
 def _get_runtime():
     global _RUNTIME_CACHE
     if _RUNTIME_CACHE is None:
-        mg = ManifestGraph()   # defaults to folder of utils.py
-        mg.load()              # loads manifest + nodes/edges and builds mg.G
+        mg = ManifestGraph()
+        mg.load()
         ops = GraphOps(mg.G)
-        _RUNTIME_CACHE = (mg, ops)
+        integrity = mg.checksum_status()
+        version = integrity.get("checksum") or integrity.get("content_rev") or "unknown"
+        _RUNTIME_CACHE = (mg, ops, version)
     return _RUNTIME_CACHE
+
+def get_corpus_version() -> str:
+    _, _, version = _get_runtime()
+    return version
 
 
 async def stream(
@@ -383,7 +389,7 @@ async def stream(
     pricing_per_million: Tuple[float, float] = (0.05, 0.40),
     selected_trace_ids: Optional[List[str]] = None,   # <-- NEW
 ) -> AsyncGenerator[Dict[str, Any], None]:
-    mg, ops = _get_runtime()
+    mg, ops, version = _get_runtime()
     async for evt in stream_all_traces(
         mg.G,
         ops,
@@ -423,7 +429,7 @@ from .utils import ManifestGraph, GraphOps  # already imported above
 # _RUNTIME_CACHE, _get_runtime() exist
 
 async def get_outline() -> dict:
-    mg, ops = _get_runtime()
+    mg, ops, version = _get_runtime()
     outline, indices = ops.build_outline_for_frontend()
     # ⬅️ NEW: attach intent info to each Section in the outline
     ops.enrich_sections_with_intents(outline, indices["uuid_to_node"])
@@ -437,3 +443,4 @@ async def get_outline() -> dict:
         # { <section_uuid>: [ {trace_uuid, bottom_uuid, bottom_paragraph_id, path_labels, results: []}, ... ] }
         # "trace_lookup": trace_lookup,  # { <trace_uuid>: { section_uuid, index, bottom_uuid } }
     }
+
