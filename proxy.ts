@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 
 const PROTECTED_PREFIXES = ["/graph", "/docs", "/settings"];
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Skip API and static files
