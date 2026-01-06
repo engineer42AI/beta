@@ -84,7 +84,8 @@ export function registerOutlineHandlers() {
       seq.backendReq({ method: "GET", url }, `HTTP GET → ${url}`);
 
       // 4) call backend
-      const res        = await fetch(url, { cache: "no-store" });
+      // const res  = await fetch(url, { cache: "no-store" });
+      const res = await fetch(url);
       const httpStatus = res.status;
 
       // 5) progress: HTTP status observed

@@ -114,32 +114,47 @@ async def agent_outline(name: str, request: Request):
     if not callable(fn):
         raise HTTPException(status_code=404, detail=f"Agent '{name}' missing get_outline()")
 
-    # ✅ dynamic version (changes when you rebuild corpus)
     version = _get_outline_version(mod, OUTLINE_VERSION)
 
-    # ✅ ETag should include name + version
-    safe_version = version.replace("sha256:", "sha256-").replace(":", "-")
+    # ETag must be header-safe (no colons)
+    # TODO im trying to build cache for the 2MB size of the outline payload. Its loading slow right now so im trying
+    #  to cache it but its not working well. Worth following up on this later.
+
+    safe_version = str(version).replace("sha256:", "sha256-").replace(":", "-")
+    # (optional) keep it short
+    safe_version = safe_version[:64]
+
     etag = f'"{name}-{safe_version}"'
 
-    # If client already has it, short-circuit
-    if request.headers.get("if-none-match") == etag:
+    # Parse If-None-Match robustly (can be: W/"...", "..." , multiple values)
+    inm = request.headers.get("if-none-match") or ""
+    inm_tokens = [t.strip() for t in inm.split(",") if t.strip()]
+    matches = (etag in inm_tokens) or (f"W/{etag}" in inm_tokens)
+
+    if matches:
         resp = Response(status_code=304)
         resp.headers["ETag"] = etag
-        # ✅ don’t use immutable; allow periodic revalidation
-        resp.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+        # With max-age=0, browser will revalidate every time (fine for “always fresh”)
+        resp.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
         resp.headers["Vary"] = "Accept-Encoding"
+        # Debug headers (so you can confirm 304 path is hit)
+        resp.headers["X-Outline-Debug"] = "agents.py-outline-route-v2"
+        resp.headers["X-Outline-Cache"] = "CLIENT-304"
         return resp
 
-    # ✅ server-side cached bytes keyed by (name, version)
     cache_key = (name, version)
     body = _OUTLINE_CACHE.get(cache_key)
-    if body is None:
+    cache_hit = body is not None
+
+    if not cache_hit:
         data = await fn()
         body = _compact_json_bytes(data)
         _OUTLINE_CACHE[cache_key] = body
 
     resp = Response(content=body, media_type="application/json")
     resp.headers["ETag"] = etag
-    resp.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+    resp.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
     resp.headers["Vary"] = "Accept-Encoding"
+    resp.headers["X-Outline-Debug"] = "agents.py-outline-route-v2"
+    resp.headers["X-Outline-Cache"] = "HIT" if cache_hit else "MISS"
     return resp
