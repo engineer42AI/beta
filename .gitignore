@@ -44,3 +44,20 @@ next-env.d.ts
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# local venvs
+.venv/
+venv/
+backend/.venv/
+
+# weird/accidental filenames
+=
