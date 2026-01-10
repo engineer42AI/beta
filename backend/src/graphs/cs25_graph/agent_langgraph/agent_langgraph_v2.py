@@ -287,9 +287,18 @@ async def stream_agent_response(
         await pb_register(tab_id, _emit)
         registered = True
 
+    selected_ids = []
+    if context and isinstance(context, dict):
+        selected_ids = context.get("selected_ids") or []
+    if not selected_ids:
+        selected_ids = merged_ctx.get("selected_ids") or []
+
     init_state = {
         "messages": [{"role": "user", "content": query}],
         "tab_id": tab_id,
+        "selected_ids": selected_ids,
+        "selection_metadata": merged_ctx.get("metadata") or (context or {}).get("metadata") or {},
+
         "selections_frozen": merged_ctx.get("selections_frozen"),
         "selections_frozen_at": merged_ctx.get("selections_frozen_at"),
     }

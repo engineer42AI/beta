@@ -165,6 +165,21 @@ export function registerAgentLangGraphHandlers() {
 
     let res: Response;
     try {
+
+      orchestrator.sendToConsole("agent.debug.selections", {
+          payload: {
+            route,
+            tabId,
+            bindingKey: makeBindingKey(route!, tabId!),
+            selectedCount: selected_ids.length,
+            selected_ids_sample: selected_ids.slice(0, 5),
+            storeHas: Object.keys(usePageConfigStore.getState().configs ?? {}).length,
+          }
+      }, "Selections at send()");
+
+
+
+
       res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -161,6 +161,11 @@ function statusMeta(status: NeedDecisionStatus) {
   }
 }
 
+function dispatchNeedsOverlayChanged(tabId: string) {
+  try {
+    window.dispatchEvent(new CustomEvent("e42.needsTable.overlayChanged", { detail: { tabId } }));
+  } catch {}
+}
 /* ---------------- movable + resizable columns ---------------- */
 
 type ColId = "exp" | "clause" | "need" | "ids" | "status";
@@ -550,11 +555,40 @@ function StreamTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [DECISIONS_KEY, EVALS_KEY]);
 
+  // ✅ allow external workspace switcher to force-reload decisions/evals from localStorage
+  React.useEffect(() => {
+    if (!tabId) return;
+
+    const handler = (e: any) => {
+      const t = e?.detail?.tabId;
+      if (t && t !== tabId) return;
+
+      try {
+        const rawD = localStorage.getItem(DECISIONS_KEY);
+        setDecisions(rawD ? JSON.parse(rawD) : {});
+      } catch {
+        setDecisions({});
+      }
+
+      try {
+        const rawE = localStorage.getItem(EVALS_KEY);
+        setEvals(rawE ? JSON.parse(rawE) : {});
+      } catch {
+        setEvals({});
+      }
+    };
+
+    window.addEventListener("e42.needsTable.reload", handler as any);
+    return () => window.removeEventListener("e42.needsTable.reload", handler as any);
+  }, [tabId, DECISIONS_KEY, EVALS_KEY]);
+
+
   React.useEffect(() => {
     if (!tabId) return;
     try {
       localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions ?? {}));
     } catch {}
+    dispatchNeedsOverlayChanged(tabId);
   }, [tabId, DECISIONS_KEY, decisions]);
 
   React.useEffect(() => {
@@ -562,6 +596,7 @@ function StreamTable({
     try {
       localStorage.setItem(EVALS_KEY, JSON.stringify(evals ?? {}));
     } catch {}
+    dispatchNeedsOverlayChanged(tabId);
   }, [tabId, EVALS_KEY, evals]);
 
   const effectiveStatus = React.useCallback(
@@ -838,6 +873,8 @@ function StreamTable({
   }
 
   const reorderable = order.filter((c) => c !== "exp");
+
+
 
   return (
     <>

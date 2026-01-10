@@ -43,6 +43,8 @@ import { IS_PROD } from "@/lib/env";
 import LoggerClient from "./loggerClient";
 import { useNeedsTableStore } from "./stores/needs-table-store";
 
+import { NeedsWorkspaceFlow } from "./NeedsWorkspaceFlow";
+
 /* ----------------- helpers ----------------- */
 
 const makeId = () =>
@@ -807,6 +809,10 @@ export default function BrowseCertSpecV4Page() {
                       clusters={needsState?.clusters}
                       strands={needsState?.strands}                 // ✅ new
                     />
+
+                    <div className="mt-4">
+                      <NeedsWorkspaceFlow tabId={boundTabId ?? ""} />
+                    </div>
 
                     <div className="mt-3 flex flex-col items-center gap-2">
                       <p className="text-[11px] text-muted-foreground leading-snug text-center max-w-[50ch]">
