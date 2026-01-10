@@ -83,13 +83,16 @@ function pruneOrphanCommits(next: WorkspaceState): WorkspaceState {
   const reachable = new Set<string>();
 
   const visit = (headId: string) => {
-    let cur = next.commits[headId];
-    let guard = 0;
-    while (cur && guard++ < 5000) {
-      if (reachable.has(cur.id)) break;
-      reachable.add(cur.id);
-      cur = cur.parentId ? next.commits[cur.parentId] : undefined;
-    }
+      let cur: Commit | undefined = next.commits[headId];
+      let guard = 0;
+
+      while (cur && guard++ < 5000) {
+        if (reachable.has(cur.id)) break;
+        reachable.add(cur.id);
+
+        if (!cur.parentId) break;
+        cur = next.commits[cur.parentId]; // may become undefined at runtime -> loop ends
+      }
   };
 
   for (const b of Object.values(next.branches)) {
