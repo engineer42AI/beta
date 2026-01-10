@@ -244,17 +244,18 @@ function buildGitGraph(state: WorkspaceState, maxDepth: number): GitGraphBuild {
   // -------- helpers --------
 
   const chainBack = (headId: string, stopAtId?: string | null) => {
-    // returns newest->oldest (we reverse later)
-    const out: Commit[] = [];
-    let cur = commits[headId];
-    let guard = 0;
+      const out: Commit[] = [];
+      let cur: Commit | undefined = commits[headId];
+      let guard = 0;
 
-    while (cur && guard++ < maxDepth) {
-      out.push(cur);
-      if (stopAtId && cur.id === stopAtId) break;
-      cur = cur.parentId ? commits[cur.parentId] : undefined;
-    }
-    return out;
+      while (cur && guard++ < maxDepth) {
+        out.push(cur);
+        if (stopAtId && cur.id === stopAtId) break;
+
+        if (!cur.parentId) break;
+        cur = commits[cur.parentId]; // may be undefined -> loop ends
+      }
+      return out;
   };
 
   // Allocate mermaid-safe branch names
